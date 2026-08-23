@@ -1,0 +1,65 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../generated/prisma"
+  runtime                = "nodejs"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum RoomVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum RoomRole {
+  OWNER
+  MEMBER
+}
+
+model User {
+  id          String           @id @default(cuid())
+  email       String           @unique
+  displayName String?
+  imageUrl    String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  ownedRooms  Room[]           @relation("RoomOwner")
+  memberships RoomMembership[]
+}
+
+model Room {
+  id          String           @id @default(cuid())
+  name        String
+  slug        String           @unique
+  description String?
+  visibility  RoomVisibility   @default(PRIVATE)
+  ownerId     String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  owner       User             @relation("RoomOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  memberships RoomMembership[]
+
+  @@index([ownerId])
+}
+
+model RoomMembership {
+  id       String   @id @default(cuid())
+  userId   String
+  roomId   String
+  role     RoomRole @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roomId])
+  @@index([userId])
+  @@index([roomId])
+}
