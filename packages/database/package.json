@@ -9,10 +9,12 @@
     "build": "tsc",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "prisma:seed": "tsx prisma/seed.ts"
   },
   "devDependencies": {
     "prisma": "^7.9.1",
+    "tsx": "^4.23.12",
     "typescript": "^5.9.3"
   },
   "dependencies": {
