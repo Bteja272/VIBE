@@ -4,16 +4,9 @@ import { fileURLToPath } from "node:url";
 
 import { createPrismaClient } from "../src/client.js";
 
-// ESM does not provide __dirname directly.
-// Reconstruct it from the current module's URL.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// seed.ts is:
-// VIBE/packages/database/prisma/seed.ts
-//
-// ../../../.env resolves to:
-// VIBE/.env
 config({
   path: resolve(__dirname, "../../../.env"),
 });
@@ -27,22 +20,38 @@ if (!databaseUrl) {
 const prisma = createPrismaClient(databaseUrl);
 
 async function main() {
-  const user = await prisma.user.upsert({
-    where: {
-      email: "dev@vibe.local",
-    },
-    update: {},
-    create: {
-      email: "dev@vibe.local",
-      displayName: "VIBE Dev",
-    },
-  });
+  const users = await Promise.all([
+    prisma.user.upsert({
+      where: {
+        email: "dev@vibe.local",
+      },
+      update: {},
+      create: {
+        email: "dev@vibe.local",
+        displayName: "VIBE Dev",
+      },
+    }),
 
-  console.log("Development user ready:", {
-    id: user.id,
-    email: user.email,
-    displayName: user.displayName,
-  });
+    prisma.user.upsert({
+      where: {
+        email: "dev2@vibe.local",
+      },
+      update: {},
+      create: {
+        email: "dev2@vibe.local",
+        displayName: "VIBE Guest",
+      },
+    }),
+  ]);
+
+  console.log(
+    "Development users ready:",
+    users.map((user) => ({
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+    })),
+  );
 }
 
 main()

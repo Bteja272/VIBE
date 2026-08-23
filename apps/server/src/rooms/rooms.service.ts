@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -10,6 +11,7 @@ import {
 
 import { DatabaseService } from '../database/database.service';
 import { CreateRoomDto } from './dto/create-room.dto';
+import { UpdateRoomDto } from './dto/update-room.dto';
 
 @Injectable()
 export class RoomsService {
@@ -21,16 +23,7 @@ export class RoomsService {
     email: string,
     input: CreateRoomDto,
   ) {
-    const user =
-      await this.databaseService.client.user.findUnique({
-        where: { email },
-      });
-
-    if (!user) {
-      throw new NotFoundException(
-        'Development user not found',
-      );
-    }
+    const user = await this.findUserByEmail(email);
 
     return this.create(user.id, input);
   }
@@ -49,6 +42,7 @@ export class RoomsService {
         visibility:
           input.visibility ?? RoomVisibility.PRIVATE,
         ownerId,
+
         memberships: {
           create: {
             userId: ownerId,
@@ -56,6 +50,7 @@ export class RoomsService {
           },
         },
       },
+
       include: {
         owner: true,
         memberships: true,
@@ -67,8 +62,14 @@ export class RoomsService {
     return this.databaseService.client.room.findMany({
       include: {
         owner: true,
-        memberships: true,
+
+        memberships: {
+          include: {
+            user: true,
+          },
+        },
       },
+
       orderBy: {
         createdAt: 'desc',
       },
@@ -78,10 +79,239 @@ export class RoomsService {
   async findById(roomId: string) {
     const room =
       await this.databaseService.client.room.findUnique({
-        where: { id: roomId },
+        where: {
+          id: roomId,
+        },
+
         include: {
           owner: true,
-          memberships: true,
+
+          memberships: {
+            include: {
+              user: true,
+            },
+          },
+        },
+      });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    return room;
+  }
+
+  async findBySlug(slug: string) {
+    const room =
+      await this.databaseService.client.room.findUnique({
+        where: {
+          slug,
+        },
+
+        include: {
+          owner: true,
+
+          memberships: {
+            include: {
+              user: true,
+            },
+          },
+        },
+      });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    return room;
+  }
+
+  async join(
+    roomId: string,
+    email: string,
+  ) {
+    const user = await this.findUserByEmail(email);
+
+    await this.ensureRoomExists(roomId);
+
+    /*
+     * Upsert makes joining idempotent.
+     *
+     * If the membership already exists, Prisma simply
+     * returns it instead of creating a duplicate.
+     */
+    return this.databaseService.client.roomMembership.upsert({
+      where: {
+        userId_roomId: {
+          userId: user.id,
+          roomId,
+        },
+      },
+
+      update: {},
+
+      create: {
+        userId: user.id,
+        roomId,
+        role: RoomRole.MEMBER,
+      },
+
+      include: {
+        user: true,
+        room: true,
+      },
+    });
+  }
+
+  async leave(
+    roomId: string,
+    email: string,
+  ) {
+    const user = await this.findUserByEmail(email);
+
+    const room =
+      await this.databaseService.client.room.findUnique({
+        where: {
+          id: roomId,
+        },
+      });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    /*
+     * Owners cannot simply leave because that would create
+     * a room with an ownerId pointing to someone who is no
+     * longer a room member.
+     *
+     * Later we could add ownership transfer.
+     */
+    if (room.ownerId === user.id) {
+      throw new ForbiddenException(
+        'Room owner cannot leave the room',
+      );
+    }
+
+    const result =
+      await this.databaseService.client.roomMembership.deleteMany({
+        where: {
+          userId: user.id,
+          roomId,
+        },
+      });
+
+    /*
+     * deleteMany makes leave idempotent.
+     *
+     * Calling leave twice does not crash:
+     * second call simply reports left = false.
+     */
+    return {
+      left: result.count > 0,
+    };
+  }
+
+  async update(
+    roomId: string,
+    email: string,
+    input: UpdateRoomDto,
+  ) {
+    const user = await this.findUserByEmail(email);
+
+    const room =
+      await this.databaseService.client.room.findUnique({
+        where: {
+          id: roomId,
+        },
+      });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    if (room.ownerId !== user.id) {
+      throw new ForbiddenException(
+        'Only the room owner can update this room',
+      );
+    }
+
+    return this.databaseService.client.room.update({
+      where: {
+        id: roomId,
+      },
+
+      data: {
+        name: input.name,
+        description: input.description,
+        visibility: input.visibility,
+      },
+
+      include: {
+        owner: true,
+        memberships: true,
+      },
+    });
+  }
+
+  async remove(
+    roomId: string,
+    email: string,
+  ) {
+    const user = await this.findUserByEmail(email);
+
+    const room =
+      await this.databaseService.client.room.findUnique({
+        where: {
+          id: roomId,
+        },
+      });
+
+    if (!room) {
+      throw new NotFoundException('Room not found');
+    }
+
+    if (room.ownerId !== user.id) {
+      throw new ForbiddenException(
+        'Only the room owner can delete this room',
+      );
+    }
+
+    await this.databaseService.client.room.delete({
+      where: {
+        id: roomId,
+      },
+    });
+
+    return {
+      deleted: true,
+    };
+  }
+
+  private async findUserByEmail(email: string) {
+    const user =
+      await this.databaseService.client.user.findUnique({
+        where: {
+          email,
+        },
+      });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
+  }
+
+  private async ensureRoomExists(roomId: string) {
+    const room =
+      await this.databaseService.client.room.findUnique({
+        where: {
+          id: roomId,
+        },
+
+        select: {
+          id: true,
         },
       });
 
