@@ -8,7 +8,8 @@ export default async function HomePage() {
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto max-w-6xl px-6 py-12">
-        <header className="mb-10">
+        <header className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+        <div>
           <p className="mb-2 text-sm uppercase tracking-[0.2em] text-neutral-500">
             VIBE
           </p>
@@ -21,7 +22,15 @@ export default async function HomePage() {
             Ambient spaces for studying, listening,
             hanging out, and playing together.
           </p>
-        </header>
+        </div>
+
+        <Link
+          href="/rooms/new"
+          className="w-fit rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950"
+        >
+          Create room
+        </Link>
+      </header>
 
         {rooms.length === 0 ? (
           <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-8">
