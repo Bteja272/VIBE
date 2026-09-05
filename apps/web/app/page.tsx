@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { getRooms } from "@/src/lib/api";
+import AuthControls from "@/components/auth-controls";
 
 export default async function HomePage() {
   const rooms = await getRooms();
@@ -24,12 +25,16 @@ export default async function HomePage() {
           </p>
         </div>
 
-        <Link
-          href="/rooms/new"
-          className="w-fit rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950"
-        >
-          Create room
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <AuthControls />
+
+          <Link
+            href="/rooms/new"
+            className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950"
+          >
+            Create room
+          </Link>
+        </div>
       </header>
 
         {rooms.length === 0 ? (
