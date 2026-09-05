@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { socket } from "@/src/lib/socket";
+import { getPresenceId } from "@/src/lib/presence-session";
 
 interface RoomPresenceProps {
   roomId: string;
@@ -13,6 +14,7 @@ interface RoomPresenceProps {
 interface PresenceUser {
   socketId: string;
   userEmail: string;
+  presenceId: string;
 }
 
 interface PresenceUpdate {
@@ -61,6 +63,7 @@ export default function RoomPresence({
           {
             roomId,
             userEmail: currentUserEmail,
+            presenceId: getPresenceId(),
           },
         );
       }
@@ -203,7 +206,7 @@ export default function RoomPresence({
         <div className="mt-5 space-y-2">
           {users.map((user) => (
             <div
-              key={user.socketId}
+              key={user.presenceId}
               className="flex items-center gap-3 rounded-xl bg-neutral-950 px-4 py-3"
             >
               <div className="h-2.5 w-2.5 rounded-full bg-green-400" />

@@ -27,5 +27,8 @@ export interface Room {
   createdAt: string;
   updatedAt: string;
   owner: RoomUser;
+  memberCount: number;
+  capacity: number;
+  isFull: boolean;
   memberships: RoomMembership[];
 }

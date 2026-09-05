@@ -5,7 +5,8 @@ import { getRoomBySlug } from "@/src/lib/api";
 import RoomActions from "@/components/room-actions";
 import OwnerRoomActions from "@/components/owner-room-actions";
 import RoomPresence from "@/components/room-presence";
-
+import RoomChat from "@/components/room-chat";
+import RoomMusic from "@/components/room-music";
 interface RoomPageProps {
   params: Promise<{
     slug: string;
@@ -57,6 +58,7 @@ export default async function RoomPage({ params }: RoomPageProps) {
                   roomId={room.id}
                   isMember={isMember}
                   isOwner={isOwner}
+                  isFull={room.isFull}
                 />
               </div>
 
@@ -78,6 +80,16 @@ export default async function RoomPage({ params }: RoomPageProps) {
                   shouldBePresent={isOwner || isMember}
                   currentUserEmail={currentUserEmail}
                 />
+              </section>
+              <section className="mt-8">
+                <RoomMusic
+                  roomId={room.id}
+                  isOwner={isOwner}
+                  canControl={isOwner || isMember}
+                />
+              </section>
+              <section className="mt-8">
+                <RoomChat roomId={room.id} canSend={isOwner || isMember} />
               </section>
             </div>
 
