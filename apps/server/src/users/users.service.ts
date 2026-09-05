@@ -1,6 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
 import { DatabaseService } from '../database/database.service';
+
+interface UpsertRegisteredUserInput {
+  email: string;
+  displayName: string;
+  imageUrl?: string;
+}
 
 @Injectable()
 export class UsersService {
@@ -8,27 +14,40 @@ export class UsersService {
     private readonly databaseService: DatabaseService,
   ) {}
 
-  async findById(userId: string) {
-    const user = await this.databaseService.client.user.findUnique({
-      where: { id: userId },
+  async findByEmail(email: string) {
+    return this.databaseService.client.user.findUnique({
+      where: {
+        email,
+      },
     });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    return user;
   }
 
-  async findByEmail(email: string) {
-    const user = await this.databaseService.client.user.findUnique({
-      where: { email },
+  async findById(id: string) {
+    return this.databaseService.client.user.findUnique({
+      where: {
+        id,
+      },
     });
+  }
 
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+  async upsertRegisteredUser(
+    input: UpsertRegisteredUserInput,
+  ) {
+    return this.databaseService.client.user.upsert({
+      where: {
+        email: input.email,
+      },
 
-    return user;
+      update: {
+        displayName: input.displayName,
+        imageUrl: input.imageUrl ?? null,
+      },
+
+      create: {
+        email: input.email,
+        displayName: input.displayName,
+        imageUrl: input.imageUrl ?? null,
+      },
+    });
   }
 }

@@ -21,9 +21,6 @@ export default async function RoomPage({ params }: RoomPageProps) {
     notFound();
   }
   const currentUserEmail = "dev2@vibe.local";
-  const ownerDevEmail = "dev@vibe.local";
-
-  const isDevOwner = room.owner.email === ownerDevEmail;
 
   const currentMembership = room.memberships.find(
     (membership) => membership.user.email === currentUserEmail,
@@ -63,7 +60,7 @@ export default async function RoomPage({ params }: RoomPageProps) {
                 />
               </div>
 
-              {isDevOwner && (
+              {isOwner && (
                 <section className="mb-8">
                   <h2 className="mb-4 text-xl font-semibold">Owner controls</h2>
 

@@ -7,6 +7,7 @@ import { DatabaseModule } from './database/database.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { UsersModule } from './users/users.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     DatabaseModule,
     UsersModule,
     RoomsModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
