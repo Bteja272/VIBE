@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { socket } from "@/src/lib/socket";
 import { joinRoom, leaveRoom } from "@/src/lib/api";
 
 interface RoomActionsProps {
@@ -31,6 +32,11 @@ export default function RoomActions({
     try {
       await joinRoom(roomId, DEV_USER_EMAIL);
 
+      socket.emit("presence:enter", {
+        roomId,
+        userEmail: DEV_USER_EMAIL,
+      });
+
       setMember(true);
 
       router.refresh();
@@ -52,6 +58,20 @@ export default function RoomActions({
     try {
       await leaveRoom(roomId, DEV_USER_EMAIL);
 
+      socket.emit(
+        "presence:leave",
+        undefined,
+        (response: {
+          left: boolean;
+          roomId?: string;
+        }) => {
+          console.log(
+            "Left live presence:",
+            response,
+          );
+        },
+      );
+
       setMember(false);
 
       router.refresh();
@@ -67,13 +87,7 @@ export default function RoomActions({
   }
 
   if (isOwner) {
-    return (
-      <div>
-        <span className="rounded-lg bg-neutral-800 px-4 py-2 text-sm text-neutral-300">
-          You own this room
-        </span>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -85,7 +99,9 @@ export default function RoomActions({
           disabled={loading}
           className="rounded-lg border border-neutral-700 px-4 py-2 text-sm font-medium transition hover:border-neutral-500 disabled:opacity-50"
         >
-          {loading ? "Leaving..." : "Leave room"}
+          {loading
+            ? "Leaving..."
+            : "Leave room"}
         </button>
       ) : (
         <button
@@ -94,7 +110,9 @@ export default function RoomActions({
           disabled={loading}
           className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
         >
-          {loading ? "Joining..." : "Join room"}
+          {loading
+            ? "Joining..."
+            : "Join room"}
         </button>
       )}
 

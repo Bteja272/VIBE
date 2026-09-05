@@ -2,8 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { getRoomBySlug } from "@/src/lib/api";
-import RoomActions from "@/src/components/room-actions";
-import OwnerRoomActions from "@/src/components/owner-room-actions";
+import RoomActions from "@/components/room-actions";
+import OwnerRoomActions from "@/components/owner-room-actions";
 import RoomPresence from "@/components/room-presence";
 
 interface RoomPageProps {
@@ -76,7 +76,11 @@ export default async function RoomPage({ params }: RoomPageProps) {
                 </section>
               )}
               <section className="mt-8">
-                <RoomPresence roomId={room.id} />
+                <RoomPresence
+                  roomId={room.id}
+                  shouldBePresent={isOwner || isMember}
+                  currentUserEmail={currentUserEmail}
+                />
               </section>
             </div>
 
