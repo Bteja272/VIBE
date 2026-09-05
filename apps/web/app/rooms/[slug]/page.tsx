@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getRoomBySlug } from "@/src/lib/api";
 import RoomActions from "@/src/components/room-actions";
 import OwnerRoomActions from "@/src/components/owner-room-actions";
+import RoomPresence from "@/components/room-presence";
 
 interface RoomPageProps {
   params: Promise<{
@@ -11,9 +12,7 @@ interface RoomPageProps {
   }>;
 }
 
-export default async function RoomPage({
-  params,
-}: RoomPageProps) {
+export default async function RoomPage({ params }: RoomPageProps) {
   const { slug } = await params;
 
   const room = await getRoomBySlug(slug);
@@ -21,22 +20,18 @@ export default async function RoomPage({
   if (!room) {
     notFound();
   }
-    const currentUserEmail = "dev2@vibe.local";
-    const ownerDevEmail = "dev@vibe.local";
+  const currentUserEmail = "dev2@vibe.local";
+  const ownerDevEmail = "dev@vibe.local";
 
-    const isDevOwner =
-    room.owner.email === ownerDevEmail;
+  const isDevOwner = room.owner.email === ownerDevEmail;
 
+  const currentMembership = room.memberships.find(
+    (membership) => membership.user.email === currentUserEmail,
+  );
 
-    const currentMembership = room.memberships.find(
-    (membership) =>
-        membership.user.email === currentUserEmail,
-    );
+  const isMember = Boolean(currentMembership);
 
-    const isMember = Boolean(currentMembership);
-
-    const isOwner =
-    room.owner.email === currentUserEmail;
+  const isOwner = room.owner.email === currentUserEmail;
 
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-100">
@@ -55,36 +50,34 @@ export default async function RoomPage({
                 VIBE Room
               </p>
 
-              <h1 className="text-4xl font-semibold">
-                {room.name}
-              </h1>
+              <h1 className="text-4xl font-semibold">{room.name}</h1>
 
               <p className="mt-3 max-w-2xl text-neutral-400">
-                {room.description ??
-                  "No description provided."}
+                {room.description ?? "No description provided."}
               </p>
-                <div className="mt-6">
+              <div className="mt-6">
                 <RoomActions
-                    roomId={room.id}
-                    isMember={isMember}
-                    isOwner={isOwner}
+                  roomId={room.id}
+                  isMember={isMember}
+                  isOwner={isOwner}
                 />
-                </div>
+              </div>
 
-                                {isDevOwner && (
+              {isDevOwner && (
                 <section className="mb-8">
-                    <h2 className="mb-4 text-xl font-semibold">
-                    Owner controls
-                    </h2>
+                  <h2 className="mb-4 text-xl font-semibold">Owner controls</h2>
 
-                    <OwnerRoomActions
+                  <OwnerRoomActions
                     roomId={room.id}
                     initialName={room.name}
                     initialDescription={room.description}
                     initialVisibility={room.visibility}
-                    />
+                  />
                 </section>
-                )}
+              )}
+              <section className="mt-8">
+                <RoomPresence roomId={room.id} />
+              </section>
             </div>
 
             <span className="w-fit rounded-full bg-neutral-800 px-3 py-1 text-xs text-neutral-300">
@@ -95,20 +88,15 @@ export default async function RoomPage({
 
         <section className="grid gap-6 py-8 md:grid-cols-3">
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-            <p className="text-sm text-neutral-500">
-              Owner
-            </p>
+            <p className="text-sm text-neutral-500">Owner</p>
 
             <p className="mt-2 font-medium">
-              {room.owner.displayName ??
-                room.owner.email}
+              {room.owner.displayName ?? room.owner.email}
             </p>
           </div>
 
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-            <p className="text-sm text-neutral-500">
-              Members
-            </p>
+            <p className="text-sm text-neutral-500">Members</p>
 
             <p className="mt-2 text-2xl font-semibold">
               {room.memberships.length}
@@ -116,20 +104,14 @@ export default async function RoomPage({
           </div>
 
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-            <p className="text-sm text-neutral-500">
-              Room ID
-            </p>
+            <p className="text-sm text-neutral-500">Room ID</p>
 
-            <p className="mt-2 break-all text-sm text-neutral-300">
-              {room.id}
-            </p>
+            <p className="mt-2 break-all text-sm text-neutral-300">{room.id}</p>
           </div>
         </section>
 
         <section>
-          <h2 className="text-2xl font-semibold">
-            Members
-          </h2>
+          <h2 className="text-2xl font-semibold">Members</h2>
 
           <div className="mt-5 space-y-3">
             {room.memberships.map((membership) => (
@@ -139,8 +121,7 @@ export default async function RoomPage({
               >
                 <div>
                   <p className="font-medium">
-                    {membership.user.displayName ??
-                      membership.user.email}
+                    {membership.user.displayName ?? membership.user.email}
                   </p>
 
                   <p className="mt-1 text-sm text-neutral-500">
