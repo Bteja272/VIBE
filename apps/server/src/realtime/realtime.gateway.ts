@@ -3,10 +3,15 @@ import {
 } from '@nestjs/common';
 
 import {
+  JwtService,
+} from '@nestjs/jwt';
+
+import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -17,7 +22,14 @@ import type {
   Socket,
 } from 'socket.io';
 
-import { ChatService } from './chat.service';
+import type {
+  AuthUser,
+  VibeJwtPayload,
+} from '../auth/auth-user';
+
+import {
+  ChatService,
+} from './chat.service';
 
 import {
   MusicService,
@@ -35,7 +47,6 @@ interface RoomPayload {
 interface EnterPresencePayload {
   roomId: string;
   presenceId: string;
-  userEmail: string;
 }
 
 interface ChatSendPayload {
@@ -49,16 +60,19 @@ interface MusicSetPayload {
 }
 
 interface MusicPermissionPayload {
-  permission: MusicPermission;
+  permission:
+    MusicPermission;
 }
 
 @WebSocketGateway({
   cors: {
-    origin: 'http://localhost:3000',
+    origin:
+      'http://localhost:3000',
   },
 })
 export class RealtimeGateway
   implements
+    OnGatewayInit<Server>,
     OnGatewayConnection,
     OnGatewayDisconnect
 {
@@ -66,6 +80,9 @@ export class RealtimeGateway
   server: Server;
 
   constructor(
+    private readonly jwtService:
+      JwtService,
+
     private readonly presenceService:
       PresenceService,
 
@@ -75,6 +92,108 @@ export class RealtimeGateway
     private readonly musicService:
       MusicService,
   ) {}
+
+  afterInit(
+    server: Server,
+  ) {
+    /*
+     * Socket authentication is optional.
+     *
+     * Anonymous sockets may watch rooms.
+     *
+     * A provided JWT must be valid.
+     */
+    server.use(
+      async (
+        client,
+        next,
+      ) => {
+        const token =
+          client.handshake.auth?.token;
+
+        if (
+          typeof token !==
+            'string' ||
+          !token
+        ) {
+          next();
+          return;
+        }
+
+        try {
+          const payload =
+            await this.jwtService.verifyAsync<VibeJwtPayload>(
+              token,
+              {
+                issuer:
+                  'vibe-auth',
+
+                audience:
+                  'vibe-api',
+              },
+            );
+
+          if (
+            !payload.sub ||
+            !payload.displayName ||
+            !payload.type
+          ) {
+            next(
+              new Error(
+                'Invalid authentication token',
+              ),
+            );
+
+            return;
+          }
+
+          if (
+            payload.type !==
+              'GUEST' &&
+            payload.type !==
+              'REGISTERED'
+          ) {
+            next(
+              new Error(
+                'Invalid identity type',
+              ),
+            );
+
+            return;
+          }
+
+          const user:
+            AuthUser = {
+              id:
+                payload.sub,
+
+              displayName:
+                payload.displayName,
+
+              type:
+                payload.type,
+
+              email:
+                payload.email,
+
+              imageUrl:
+                payload.imageUrl,
+            };
+
+          client.data.user =
+            user;
+
+          next();
+        } catch {
+          next(
+            new Error(
+              'Invalid or expired authentication token',
+            ),
+          );
+        }
+      },
+    );
+  }
 
   handleConnection(
     client: Socket,
@@ -96,7 +215,9 @@ export class RealtimeGateway
     );
   }
 
-  @SubscribeMessage('room:watch')
+  @SubscribeMessage(
+    'room:watch',
+  )
   async handleWatchRoom(
     @ConnectedSocket()
     client: Socket,
@@ -121,28 +242,48 @@ export class RealtimeGateway
     );
 
     return {
-      watching: true,
-      roomId: payload.roomId,
+      watching:
+        true,
+
+      roomId:
+        payload.roomId,
     };
   }
 
-  @SubscribeMessage('presence:enter')
+  @SubscribeMessage(
+    'presence:enter',
+  )
   async handleEnterPresence(
     @ConnectedSocket()
     client: Socket,
 
     @MessageBody()
-    payload: EnterPresencePayload,
+    payload:
+      EnterPresencePayload,
   ) {
+    const user =
+      client.data.user as
+        | AuthUser
+        | undefined;
+
+    if (!user) {
+      return {
+        entered:
+          false,
+
+        roomId:
+          payload.roomId,
+
+        error:
+          'Authentication required to enter the room',
+      };
+    }
+
     const roomChannel =
       this.getRoomChannel(
         payload.roomId,
       );
 
-    /*
-     * A viewer may already be watching this
-     * channel. join() is idempotent.
-     */
     await client.join(
       roomChannel,
     );
@@ -157,11 +298,6 @@ export class RealtimeGateway
         | string
         | undefined;
 
-    /*
-     * If the same socket moves directly from
-     * one active room to another, clean up its
-     * previous active presence first.
-     */
     if (
       previousRoomId &&
       previousPresenceId &&
@@ -174,23 +310,11 @@ export class RealtimeGateway
         client.id,
       );
 
-      await client.leave(
-        this.getRoomChannel(
-          previousRoomId,
-        ),
-      );
-
       await this.broadcastPresence(
         previousRoomId,
       );
     }
 
-    /*
-     * Redis is the admission authority.
-     *
-     * client.data is deliberately NOT updated
-     * until Redis successfully admits the user.
-     */
     const entered =
       await this.presenceService.addUser(
         payload.roomId,
@@ -201,16 +325,28 @@ export class RealtimeGateway
           socketId:
             client.id,
 
-          userEmail:
-            payload.userEmail,
+          userId:
+            user.id,
+
+          displayName:
+            user.displayName,
+
+          identityType:
+            user.type,
+
+          email:
+            user.email,
         },
       );
 
     if (!entered) {
       return {
-        entered: false,
+        entered:
+          false,
+
         roomId:
           payload.roomId,
+
         error:
           'Room is full',
       };
@@ -222,21 +358,22 @@ export class RealtimeGateway
     client.data.presenceId =
       payload.presenceId;
 
-    client.data.userEmail =
-      payload.userEmail;
-
     await this.broadcastPresence(
       payload.roomId,
     );
 
     return {
-      entered: true,
+      entered:
+        true,
+
       roomId:
         payload.roomId,
     };
   }
 
-  @SubscribeMessage('presence:leave')
+  @SubscribeMessage(
+    'presence:leave',
+  )
   async handleLeavePresence(
     @ConnectedSocket()
     client: Socket,
@@ -248,7 +385,8 @@ export class RealtimeGateway
 
     if (!roomId) {
       return {
-        left: false,
+        left:
+          false,
       };
     }
 
@@ -257,12 +395,16 @@ export class RealtimeGateway
     );
 
     return {
-      left: true,
+      left:
+        true,
+
       roomId,
     };
   }
 
-  @SubscribeMessage('chat:history')
+  @SubscribeMessage(
+    'chat:history',
+  )
   async handleChatHistory(
     @ConnectedSocket()
     client: Socket,
@@ -289,13 +431,16 @@ export class RealtimeGateway
     };
   }
 
-  @SubscribeMessage('chat:send')
+  @SubscribeMessage(
+    'chat:send',
+  )
   async handleChatSend(
     @ConnectedSocket()
     client: Socket,
 
     @MessageBody()
-    payload: ChatSendPayload,
+    payload:
+      ChatSendPayload,
   ) {
     const roomId =
       client.data.roomId as
@@ -307,18 +452,20 @@ export class RealtimeGateway
         | string
         | undefined;
 
-    const userEmail =
-      client.data.userEmail as
-        | string
+    const user =
+      client.data.user as
+        | AuthUser
         | undefined;
 
     if (
       !roomId ||
       !presenceId ||
-      !userEmail
+      !user
     ) {
       return {
-        sent: false,
+        sent:
+          false,
+
         error:
           'Join the room before sending messages',
       };
@@ -332,7 +479,9 @@ export class RealtimeGateway
 
     if (!present) {
       return {
-        sent: false,
+        sent:
+          false,
+
         error:
           'You are not currently present in this room',
       };
@@ -343,15 +492,22 @@ export class RealtimeGateway
 
     if (!content) {
       return {
-        sent: false,
+        sent:
+          false,
+
         error:
           'Message cannot be empty',
       };
     }
 
-    if (content.length > 500) {
+    if (
+      content.length >
+      500
+    ) {
       return {
-        sent: false,
+        sent:
+          false,
+
         error:
           'Message cannot exceed 500 characters',
       };
@@ -362,7 +518,19 @@ export class RealtimeGateway
         await this.chatService.addMessage({
           roomId,
           presenceId,
-          userEmail,
+
+          userId:
+            user.id,
+
+          displayName:
+            user.displayName,
+
+          identityType:
+            user.type,
+
+          email:
+            user.email,
+
           content,
         });
 
@@ -378,24 +546,32 @@ export class RealtimeGateway
         );
 
       return {
-        sent: true,
+        sent:
+          true,
+
         message,
       };
-    } catch (error) {
+    } catch (
+      error
+    ) {
       console.error(
         'Failed to send chat message:',
         error,
       );
 
       return {
-        sent: false,
+        sent:
+          false,
+
         error:
           'Failed to send message',
       };
     }
   }
 
-  @SubscribeMessage('music:get')
+  @SubscribeMessage(
+    'music:get',
+  )
   async handleMusicGet(
     @ConnectedSocket()
     client: Socket,
@@ -407,7 +583,9 @@ export class RealtimeGateway
 
     if (!roomId) {
       return {
-        ok: false,
+        ok:
+          false,
+
         error:
           'You are not watching a room',
       };
@@ -419,35 +597,64 @@ export class RealtimeGateway
       );
 
     return {
-      ok: true,
+      ok:
+        true,
+
       state,
     };
   }
 
-  @SubscribeMessage('music:set')
+  @SubscribeMessage(
+    'music:set',
+  )
   async handleMusicSet(
     @ConnectedSocket()
     client: Socket,
 
     @MessageBody()
-    payload: MusicSetPayload,
+    payload:
+      MusicSetPayload,
   ) {
     const roomId =
       client.data.roomId as
         | string
         | undefined;
 
-    const userEmail =
-      client.data.userEmail as
+    const presenceId =
+      client.data.presenceId as
         | string
+        | undefined;
+
+    const user =
+      client.data.user as
+        | AuthUser
         | undefined;
 
     if (
       !roomId ||
-      !userEmail
+      !presenceId ||
+      !user
     ) {
       return {
-        ok: false,
+        ok:
+          false,
+
+        error:
+          'Join the room before controlling music',
+      };
+    }
+
+    const present =
+      await this.presenceService.isPresent(
+        roomId,
+        presenceId,
+      );
+
+    if (!present) {
+      return {
+        ok:
+          false,
+
         error:
           'Join the room before controlling music',
       };
@@ -457,11 +664,15 @@ export class RealtimeGateway
       const state =
         await this.musicService.setTrack({
           roomId,
-          userEmail,
+          user,
+
           url:
-            payload?.url ?? '',
+            payload?.url ??
+            '',
+
           title:
             payload?.title,
+
           provider:
             payload?.provider,
         });
@@ -478,22 +689,30 @@ export class RealtimeGateway
         );
 
       return {
-        ok: true,
+        ok:
+          true,
+
         state,
       };
-    } catch (error) {
+    } catch (
+      error
+    ) {
       return {
-        ok: false,
+        ok:
+          false,
 
         error:
-          error instanceof Error
+          error instanceof
+            Error
             ? error.message
             : 'Unable to update music',
       };
     }
   }
 
-  @SubscribeMessage('music:clear')
+  @SubscribeMessage(
+    'music:clear',
+  )
   async handleMusicClear(
     @ConnectedSocket()
     client: Socket,
@@ -503,17 +722,41 @@ export class RealtimeGateway
         | string
         | undefined;
 
-    const userEmail =
-      client.data.userEmail as
+    const presenceId =
+      client.data.presenceId as
         | string
+        | undefined;
+
+    const user =
+      client.data.user as
+        | AuthUser
         | undefined;
 
     if (
       !roomId ||
-      !userEmail
+      !presenceId ||
+      !user
     ) {
       return {
-        ok: false,
+        ok:
+          false,
+
+        error:
+          'Join the room before controlling music',
+      };
+    }
+
+    const present =
+      await this.presenceService.isPresent(
+        roomId,
+        presenceId,
+      );
+
+    if (!present) {
+      return {
+        ok:
+          false,
+
         error:
           'Join the room before controlling music',
       };
@@ -523,7 +766,7 @@ export class RealtimeGateway
       const state =
         await this.musicService.clearTrack(
           roomId,
-          userEmail,
+          user,
         );
 
       this.server
@@ -538,47 +781,58 @@ export class RealtimeGateway
         );
 
       return {
-        ok: true,
+        ok:
+          true,
+
         state,
       };
-    } catch (error) {
+    } catch (
+      error
+    ) {
       return {
-        ok: false,
+        ok:
+          false,
 
         error:
-          error instanceof Error
+          error instanceof
+            Error
             ? error.message
             : 'Unable to clear music',
       };
     }
   }
 
-  @SubscribeMessage('music:permission')
+  @SubscribeMessage(
+    'music:permission',
+  )
   async handleMusicPermission(
     @ConnectedSocket()
     client: Socket,
 
     @MessageBody()
-    payload: MusicPermissionPayload,
+    payload:
+      MusicPermissionPayload,
   ) {
     const roomId =
       client.data.watchingRoomId as
         | string
         | undefined;
 
-    const userEmail =
-      client.data.userEmail as
-        | string
+    const user =
+      client.data.user as
+        | AuthUser
         | undefined;
 
     if (
       !roomId ||
-      !userEmail
+      !user
     ) {
       return {
-        ok: false,
+        ok:
+          false,
+
         error:
-          'You must be present in the room',
+          'Authentication required',
       };
     }
 
@@ -586,7 +840,7 @@ export class RealtimeGateway
       const state =
         await this.musicService.setPermission(
           roomId,
-          userEmail,
+          user,
           payload.permission,
         );
 
@@ -602,15 +856,21 @@ export class RealtimeGateway
         );
 
       return {
-        ok: true,
+        ok:
+          true,
+
         state,
       };
-    } catch (error) {
+    } catch (
+      error
+    ) {
       return {
-        ok: false,
+        ok:
+          false,
 
         error:
-          error instanceof Error
+          error instanceof
+            Error
             ? error.message
             : 'Unable to update music permission',
       };
@@ -649,9 +909,6 @@ export class RealtimeGateway
     client.data.presenceId =
       undefined;
 
-    client.data.userEmail =
-      undefined;
-
     await this.broadcastPresence(
       roomId,
     );
@@ -676,6 +933,7 @@ export class RealtimeGateway
         {
           roomId,
           users,
+
           count:
             users.length,
         },

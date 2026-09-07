@@ -1,7 +1,12 @@
 import Link from "next/link";
+
 import {
   notFound,
 } from "next/navigation";
+
+import {
+  auth,
+} from "@/auth";
 
 import OwnerRoomActions from "@/components/owner-room-actions";
 import RoomActions from "@/components/room-actions";
@@ -23,33 +28,42 @@ interface RoomPageProps {
 export default async function RoomPage({
   params,
 }: RoomPageProps) {
-  const { slug } =
+  const {
+    slug,
+  } =
     await params;
 
-  const room =
-    await getRoomBySlug(
-      slug,
-    );
+  const [
+    room,
+    session,
+  ] =
+    await Promise.all([
+      getRoomBySlug(
+        slug,
+      ),
+
+      auth(),
+    ]);
 
   if (!room) {
     notFound();
   }
 
-  /*
-   * Temporary development identity.
-   *
-   * This will be replaced by guest /
-   * registered JWT identity later.
-   */
   const currentUserEmail =
-    "dev2@vibe.local";
+    session?.user?.email ??
+    null;
 
   const currentMembership =
-    room.memberships.find(
-      (membership) =>
-        membership.user.email ===
-        currentUserEmail,
-    );
+    currentUserEmail
+      ? room.memberships.find(
+          (
+            membership,
+          ) =>
+            membership.user
+              .email ===
+            currentUserEmail,
+        )
+      : undefined;
 
   const isMember =
     Boolean(
@@ -57,8 +71,16 @@ export default async function RoomPage({
     );
 
   const isOwner =
-    room.owner.email ===
-    currentUserEmail;
+    Boolean(
+      currentUserEmail &&
+        room.owner.email ===
+          currentUserEmail,
+    );
+
+  const isSignedIn =
+    Boolean(
+      currentUserEmail,
+    );
 
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-100">
@@ -78,7 +100,9 @@ export default async function RoomPage({
               </p>
 
               <h1 className="text-4xl font-semibold">
-                {room.name}
+                {
+                  room.name
+                }
               </h1>
 
               <p className="mt-3 max-w-2xl text-neutral-400">
@@ -96,6 +120,9 @@ export default async function RoomPage({
                   }
                   isOwner={
                     isOwner
+                  }
+                  isSignedIn={
+                    isSignedIn
                   }
                 />
               </div>
@@ -132,9 +159,6 @@ export default async function RoomPage({
                     isOwner ||
                     isMember
                   }
-                  currentUserEmail={
-                    currentUserEmail
-                  }
                 />
               </section>
 
@@ -147,8 +171,7 @@ export default async function RoomPage({
                     isOwner
                   }
                   canControl={
-                    isOwner ||
-                    isMember
+                    true
                   }
                 />
               </section>
@@ -159,8 +182,7 @@ export default async function RoomPage({
                     room.id
                   }
                   canSend={
-                    isOwner ||
-                    isMember
+                    true
                   }
                 />
               </section>
@@ -203,7 +225,9 @@ export default async function RoomPage({
             </p>
 
             <p className="mt-2 break-all text-sm text-neutral-300">
-              {room.id}
+              {
+                room.id
+              }
             </p>
           </div>
         </section>
@@ -212,6 +236,11 @@ export default async function RoomPage({
           <h2 className="text-2xl font-semibold">
             Members
           </h2>
+
+          <p className="mt-2 text-sm text-neutral-500">
+            Registered memberships are persistent.
+            Guests appear in Live presence instead.
+          </p>
 
           <div className="mt-5 space-y-3">
             {room.memberships.map(

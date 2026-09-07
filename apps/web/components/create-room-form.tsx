@@ -1,72 +1,121 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
+import {
+  FormEvent,
+  useState,
+} from "react";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+import {
+  useRouter,
+} from "next/navigation";
+
+import {
+  createRoom,
+  getVibeToken,
+} from "@/src/lib/api";
 
 export default function CreateRoomForm() {
-  const router = useRouter();
+  const router =
+    useRouter();
 
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [visibility, setVisibility] =
-    useState<"PUBLIC" | "PRIVATE">("PRIVATE");
+  const [
+    name,
+    setName,
+  ] = useState("");
 
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [
+    description,
+    setDescription,
+  ] = useState("");
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const [
+    visibility,
+    setVisibility,
+  ] =
+    useState<
+      | "PUBLIC"
+      | "PRIVATE"
+    >("PRIVATE");
+
+  const [
+    error,
+    setError,
+  ] =
+    useState<
+      string | null
+    >(null);
+
+  const [
+    isSubmitting,
+    setIsSubmitting,
+  ] =
+    useState(false);
+
+  async function handleSubmit(
+    event:
+      FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
 
     setError(null);
-    setIsSubmitting(true);
+    setIsSubmitting(
+      true,
+    );
 
     try {
-      const response = await fetch(`${API_URL}/rooms`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-dev-user-email": "dev@vibe.local",
-        },
-        body: JSON.stringify({
-          name,
-          description: description || undefined,
-          visibility,
-        }),
-      });
+      const auth =
+        await getVibeToken();
 
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-
+      if (
+        auth.user.type !==
+        "REGISTERED"
+      ) {
         throw new Error(
-          body?.message
-            ? Array.isArray(body.message)
-              ? body.message.join(", ")
-              : body.message
-            : `Failed to create room: ${response.status}`,
+          "Sign in with Google to create a persistent room",
         );
       }
 
-      const room = await response.json();
+      const room =
+        await createRoom(
+          {
+            name,
 
-      router.push(`/rooms/${room.slug}`);
+            description:
+              description ||
+              undefined,
+
+            visibility,
+          },
+
+          auth.token,
+        );
+
+      router.push(
+        `/rooms/${room.slug}`,
+      );
+
       router.refresh();
-    } catch (err) {
+    } catch (
+      err
+    ) {
       setError(
-        err instanceof Error
+        err instanceof
+          Error
           ? err.message
           : "Something went wrong",
       );
     } finally {
-      setIsSubmitting(false);
+      setIsSubmitting(
+        false,
+      );
     }
   }
 
   return (
     <form
-      onSubmit={handleSubmit}
+      onSubmit={
+        handleSubmit
+      }
       className="space-y-6 rounded-2xl border border-neutral-800 bg-neutral-900 p-6"
     >
       <div>
@@ -79,10 +128,23 @@ export default function CreateRoomForm() {
 
         <input
           id="name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          minLength={2}
-          maxLength={80}
+          value={
+            name
+          }
+          onChange={(
+            event,
+          ) =>
+            setName(
+              event.target
+                .value,
+            )
+          }
+          minLength={
+            2
+          }
+          maxLength={
+            80
+          }
           required
           className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-3 outline-none focus:border-neutral-500"
           placeholder="Late Night Study"
@@ -99,12 +161,23 @@ export default function CreateRoomForm() {
 
         <textarea
           id="description"
-          value={description}
-          onChange={(event) =>
-            setDescription(event.target.value)
+          value={
+            description
           }
-          maxLength={300}
-          rows={4}
+          onChange={(
+            event,
+          ) =>
+            setDescription(
+              event.target
+                .value,
+            )
+          }
+          maxLength={
+            300
+          }
+          rows={
+            4
+          }
           className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-3 outline-none focus:border-neutral-500"
           placeholder="What is this room for?"
         />
@@ -120,16 +193,28 @@ export default function CreateRoomForm() {
 
         <select
           id="visibility"
-          value={visibility}
-          onChange={(event) =>
+          value={
+            visibility
+          }
+          onChange={(
+            event,
+          ) =>
             setVisibility(
-              event.target.value as "PUBLIC" | "PRIVATE",
+              event.target
+                .value as
+                | "PUBLIC"
+                | "PRIVATE",
             )
           }
           className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-3 outline-none focus:border-neutral-500"
         >
-          <option value="PRIVATE">Private</option>
-          <option value="PUBLIC">Public</option>
+          <option value="PRIVATE">
+            Private
+          </option>
+
+          <option value="PUBLIC">
+            Public
+          </option>
         </select>
       </div>
 
@@ -141,10 +226,14 @@ export default function CreateRoomForm() {
 
       <button
         type="submit"
-        disabled={isSubmitting}
+        disabled={
+          isSubmitting
+        }
         className="w-full rounded-lg bg-neutral-100 px-4 py-3 font-medium text-neutral-950 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {isSubmitting ? "Creating..." : "Create room"}
+        {isSubmitting
+          ? "Creating..."
+          : "Create room"}
       </button>
     </form>
   );

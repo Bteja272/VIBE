@@ -10,7 +10,16 @@ import { createClient } from 'redis';
 export interface PresenceUser {
   presenceId: string;
   socketId: string;
-  userEmail: string;
+
+  userId: string;
+
+  displayName: string;
+
+  identityType:
+    | 'GUEST'
+    | 'REGISTERED';
+
+  email?: string;
 }
 
 const MAX_ROOM_CAPACITY = 12;
@@ -22,22 +31,28 @@ export class PresenceService
   private readonly redis;
 
   constructor(
-    private readonly configService: ConfigService,
+    private readonly configService:
+      ConfigService,
   ) {
     const redisUrl =
-      this.configService.get<string>('REDIS_URL') ??
+      this.configService.get<string>(
+        'REDIS_URL',
+      ) ??
       'redis://localhost:6379';
 
     this.redis = createClient({
       url: redisUrl,
     });
 
-    this.redis.on('error', (error) => {
-      console.error(
-        'Redis presence error:',
-        error,
-      );
-    });
+    this.redis.on(
+      'error',
+      (error) => {
+        console.error(
+          'Redis presence error:',
+          error,
+        );
+      },
+    );
   }
 
   async onModuleInit() {
@@ -59,7 +74,9 @@ export class PresenceService
     presenceId: string,
   ): Promise<boolean> {
     return this.redis.hExists(
-      this.getPresenceKey(roomId),
+      this.getPresenceKey(
+        roomId,
+      ),
       presenceId,
     );
   }
@@ -69,17 +86,10 @@ export class PresenceService
     user: PresenceUser,
   ): Promise<boolean> {
     const key =
-      this.getPresenceKey(roomId);
+      this.getPresenceKey(
+        roomId,
+      );
 
-    /*
-     * Atomic capacity check + insert.
-     *
-     * Existing presenceIds are allowed to update
-     * their socketId. This makes refreshes safe.
-     *
-     * New presenceIds are rejected once the room
-     * already contains 12 active participants.
-     */
     const script = `
       local key = KEYS[1]
       local presenceId = ARGV[1]
@@ -105,17 +115,25 @@ export class PresenceService
       await this.redis.eval(
         script,
         {
-          keys: [key],
+          keys: [
+            key,
+          ],
 
           arguments: [
             user.presenceId,
-            JSON.stringify(user),
-            String(MAX_ROOM_CAPACITY),
+            JSON.stringify(
+              user,
+            ),
+            String(
+              MAX_ROOM_CAPACITY,
+            ),
           ],
         },
       );
 
-    return Number(result) === 1;
+    return Number(
+      result,
+    ) === 1;
   }
 
   async removeUser(
@@ -124,7 +142,9 @@ export class PresenceService
     socketId: string,
   ) {
     const key =
-      this.getPresenceKey(roomId);
+      this.getPresenceKey(
+        roomId,
+      );
 
     const stored =
       await this.redis.hGet(
@@ -136,11 +156,14 @@ export class PresenceService
       return;
     }
 
-    let current: PresenceUser;
+    let current:
+      PresenceUser;
 
     try {
       current =
-        JSON.parse(stored) as PresenceUser;
+        JSON.parse(
+          stored,
+        ) as PresenceUser;
     } catch {
       await this.redis.hDel(
         key,
@@ -151,15 +174,12 @@ export class PresenceService
     }
 
     /*
-     * A refresh creates a new socket but keeps
-     * the same presenceId.
-     *
-     * The old socket may disconnect after the new
-     * socket replaced it in Redis. Do not let the
-     * old disconnect remove the new connection.
+     * Protect a refreshed connection from
+     * the old socket's later disconnect.
      */
     if (
-      current.socketId !== socketId
+      current.socketId !==
+      socketId
     ) {
       return;
     }
@@ -170,31 +190,43 @@ export class PresenceService
     );
 
     const remaining =
-      await this.redis.hLen(key);
+      await this.redis.hLen(
+        key,
+      );
 
-    if (remaining === 0) {
-      await this.redis.del(key);
+    if (
+      remaining === 0
+    ) {
+      await this.redis.del(
+        key,
+      );
     }
   }
 
   async getUsers(
     roomId: string,
-  ): Promise<PresenceUser[]> {
+  ): Promise<
+    PresenceUser[]
+  > {
     const values =
       await this.redis.hVals(
-        this.getPresenceKey(roomId),
+        this.getPresenceKey(
+          roomId,
+        ),
       );
 
     return values
-      .map((value) => {
-        try {
-          return JSON.parse(
-            value,
-          ) as PresenceUser;
-        } catch {
-          return null;
-        }
-      })
+      .map(
+        (value) => {
+          try {
+            return JSON.parse(
+              value,
+            ) as PresenceUser;
+          } catch {
+            return null;
+          }
+        },
+      )
       .filter(
         (
           user,
@@ -207,7 +239,9 @@ export class PresenceService
     roomId: string,
   ): Promise<number> {
     return this.redis.hLen(
-      this.getPresenceKey(roomId),
+      this.getPresenceKey(
+        roomId,
+      ),
     );
   }
 

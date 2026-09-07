@@ -10,7 +10,13 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createClient } from 'redis';
 
-import { DatabaseService } from '../database/database.service';
+import type {
+  AuthUser,
+} from '../auth/auth-user';
+
+import {
+  DatabaseService,
+} from '../database/database.service';
 
 export type MusicPermission =
   | 'OWNER_ONLY'
@@ -18,7 +24,9 @@ export type MusicPermission =
 
 export interface RoomMusicState {
   roomId: string;
-  permission: MusicPermission;
+
+  permission:
+    MusicPermission;
 
   track: {
     url: string;
@@ -32,28 +40,39 @@ export interface RoomMusicState {
 
 @Injectable()
 export class MusicService
-  implements OnModuleInit, OnModuleDestroy
+  implements
+    OnModuleInit,
+    OnModuleDestroy
 {
   private readonly redis;
 
   constructor(
-    private readonly configService: ConfigService,
-    private readonly databaseService: DatabaseService,
+    private readonly configService:
+      ConfigService,
+
+    private readonly databaseService:
+      DatabaseService,
   ) {
     const redisUrl =
-      this.configService.get<string>('REDIS_URL') ??
+      this.configService.get<string>(
+        'REDIS_URL',
+      ) ??
       'redis://localhost:6379';
 
-    this.redis = createClient({
-      url: redisUrl,
-    });
+    this.redis =
+      createClient({
+        url: redisUrl,
+      });
 
-    this.redis.on('error', (error) => {
-      console.error(
-        'Redis music error:',
-        error,
-      );
-    });
+    this.redis.on(
+      'error',
+      (error) => {
+        console.error(
+          'Redis music error:',
+          error,
+        );
+      },
+    );
   }
 
   async onModuleInit() {
@@ -65,27 +84,42 @@ export class MusicService
   }
 
   async onModuleDestroy() {
-    if (this.redis.isOpen) {
+    if (
+      this.redis.isOpen
+    ) {
       await this.redis.quit();
     }
   }
 
   async getState(
     roomId: string,
-  ): Promise<RoomMusicState> {
-    await this.ensureRoomExists(roomId);
+  ): Promise<
+    RoomMusicState
+  > {
+    await this.ensureRoomExists(
+      roomId,
+    );
 
     const key =
-      this.getMusicKey(roomId);
+      this.getMusicKey(
+        roomId,
+      );
 
     const stored =
-      await this.redis.get(key);
+      await this.redis.get(
+        key,
+      );
 
     if (!stored) {
       return {
         roomId,
-        permission: 'OWNER_ONLY',
-        track: null,
+
+        permission:
+          'OWNER_ONLY',
+
+        track:
+          null,
+
         updatedAt:
           new Date().toISOString(),
       };
@@ -96,13 +130,18 @@ export class MusicService
     ) as RoomMusicState;
   }
 
-  async setTrack(input: {
-    roomId: string;
-    userEmail: string;
-    url: string;
-    title?: string;
-    provider?: string;
-  }): Promise<RoomMusicState> {
+  async setTrack(
+    input: {
+      roomId: string;
+      user: AuthUser;
+
+      url: string;
+      title?: string;
+      provider?: string;
+    },
+  ): Promise<
+    RoomMusicState
+  > {
     const state =
       await this.getState(
         input.roomId,
@@ -110,7 +149,7 @@ export class MusicService
 
     await this.ensureCanControlMusic(
       input.roomId,
-      input.userEmail,
+      input.user,
       state.permission,
     );
 
@@ -131,31 +170,32 @@ export class MusicService
       );
     }
 
-    const nextState: RoomMusicState = {
-      roomId:
-        input.roomId,
+    const nextState:
+      RoomMusicState = {
+        roomId:
+          input.roomId,
 
-      permission:
-        state.permission,
+        permission:
+          state.permission,
 
-      track: {
-        url,
+        track: {
+          url,
 
-        title:
-          input.title?.trim() ||
-          undefined,
+          title:
+            input.title?.trim() ||
+            undefined,
 
-        provider:
-          input.provider?.trim() ||
-          undefined,
+          provider:
+            input.provider?.trim() ||
+            undefined,
 
-        sharedBy:
-          input.userEmail,
-      },
+          sharedBy:
+            input.user.displayName,
+        },
 
-      updatedAt:
-        new Date().toISOString(),
-    };
+        updatedAt:
+          new Date().toISOString(),
+      };
 
     await this.saveState(
       nextState,
@@ -166,25 +206,31 @@ export class MusicService
 
   async clearTrack(
     roomId: string,
-    userEmail: string,
-  ): Promise<RoomMusicState> {
+    user: AuthUser,
+  ): Promise<
+    RoomMusicState
+  > {
     const state =
-      await this.getState(roomId);
+      await this.getState(
+        roomId,
+      );
 
     await this.ensureCanControlMusic(
       roomId,
-      userEmail,
+      user,
       state.permission,
     );
 
-    const nextState: RoomMusicState = {
-      ...state,
+    const nextState:
+      RoomMusicState = {
+        ...state,
 
-      track: null,
+        track:
+          null,
 
-      updatedAt:
-        new Date().toISOString(),
-    };
+        updatedAt:
+          new Date().toISOString(),
+      };
 
     await this.saveState(
       nextState,
@@ -195,24 +241,33 @@ export class MusicService
 
   async setPermission(
     roomId: string,
-    userEmail: string,
-    permission: MusicPermission,
-  ): Promise<RoomMusicState> {
+    user: AuthUser,
+    permission:
+      MusicPermission,
+  ): Promise<
+    RoomMusicState
+  > {
     const owner =
       await this.isRoomOwner(
         roomId,
-        userEmail,
+        user.id,
       );
 
-    if (!owner) {
+    if (
+      user.type !==
+        'REGISTERED' ||
+      !owner
+    ) {
       throw new ForbiddenException(
         'Only the room owner can change music permissions',
       );
     }
 
     if (
-      permission !== 'OWNER_ONLY' &&
-      permission !== 'ANY_MEMBER'
+      permission !==
+        'OWNER_ONLY' &&
+      permission !==
+        'ANY_MEMBER'
     ) {
       throw new BadRequestException(
         'Invalid music permission',
@@ -224,14 +279,15 @@ export class MusicService
         roomId,
       );
 
-    const nextState: RoomMusicState = {
-      ...state,
+    const nextState:
+      RoomMusicState = {
+        ...state,
 
-      permission,
+        permission,
 
-      updatedAt:
-        new Date().toISOString(),
-    };
+        updatedAt:
+          new Date().toISOString(),
+      };
 
     await this.saveState(
       nextState,
@@ -239,48 +295,60 @@ export class MusicService
 
     return nextState;
   }
+
   private async ensureCanControlMusic(
-        roomId: string,
-        userEmail: string,
-        _permission: MusicPermission,
-        ) {
-        const member =
-            await this.isRoomMember(
-            roomId,
-            userEmail,
-            );
+    roomId: string,
+    user: AuthUser,
+    permission:
+      MusicPermission,
+  ) {
+    if (
+      permission ===
+      'ANY_MEMBER'
+    ) {
+      /*
+       * The gateway already confirms this
+       * identity is actively present.
+       */
+      return;
+    }
 
-        if (!member) {
-            throw new ForbiddenException(
-            'Join the room before controlling music',
-            );
-        }
-        }
+    if (
+      user.type !==
+      'REGISTERED'
+    ) {
+      throw new ForbiddenException(
+        'Only the room owner can control music',
+      );
+    }
 
+    const owner =
+      await this.isRoomOwner(
+        roomId,
+        user.id,
+      );
+
+    if (!owner) {
+      throw new ForbiddenException(
+        'Only the room owner can control music',
+      );
+    }
+  }
 
   private async isRoomOwner(
     roomId: string,
-    email: string,
+    userId: string,
   ) {
-    const user =
-      await this.databaseService.client.user.findUnique({
-        where: {
-          email,
-        },
-      });
-
-    if (!user) {
-      return false;
-    }
-
     const room =
       await this.databaseService.client.room.findUnique({
         where: {
-          id: roomId,
+          id:
+            roomId,
         },
 
         select: {
-          ownerId: true,
+          ownerId:
+            true,
         },
       });
 
@@ -291,37 +359,8 @@ export class MusicService
     }
 
     return (
-      room.ownerId === user.id
-    );
-  }
-
-  private async isRoomMember(
-    roomId: string,
-    email: string,
-  ) {
-    const user =
-      await this.databaseService.client.user.findUnique({
-        where: {
-          email,
-        },
-      });
-
-    if (!user) {
-      return false;
-    }
-
-    const membership =
-      await this.databaseService.client.roomMembership.findUnique({
-        where: {
-          userId_roomId: {
-            userId: user.id,
-            roomId,
-          },
-        },
-      });
-
-    return Boolean(
-      membership,
+      room.ownerId ===
+      userId
     );
   }
 
@@ -331,11 +370,13 @@ export class MusicService
     const room =
       await this.databaseService.client.room.findUnique({
         where: {
-          id: roomId,
+          id:
+            roomId,
         },
 
         select: {
-          id: true,
+          id:
+            true,
         },
       });
 
@@ -353,7 +394,10 @@ export class MusicService
       this.getMusicKey(
         state.roomId,
       ),
-      JSON.stringify(state),
+
+      JSON.stringify(
+        state,
+      ),
     );
   }
 

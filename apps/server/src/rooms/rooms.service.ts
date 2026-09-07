@@ -22,25 +22,14 @@ export class RoomsService {
       DatabaseService,
   ) {}
 
-  async createByDevUser(
-    email: string,
-    input: CreateRoomDto,
-  ) {
-    const user =
-      await this.findUserByEmail(
-        email,
-      );
-
-    return this.create(
-      user.id,
-      input,
-    );
-  }
-
   async create(
     ownerId: string,
     input: CreateRoomDto,
   ) {
+    await this.ensureUserExistsById(
+      ownerId,
+    );
+
     const slug =
       this.createSlug(
         input.name,
@@ -179,33 +168,23 @@ export class RoomsService {
     );
   }
 
-  async join(
+  async joinByUserId(
     roomId: string,
-    email: string,
+    userId: string,
   ) {
-    const user =
-      await this.findUserByEmail(
-        email,
-      );
-
     await this.ensureRoomExists(
       roomId,
     );
 
-    /*
-     * Database membership is independent
-     * from active Redis occupancy.
-     *
-     * The Socket.IO presence:enter event
-     * decides whether the live room has space.
-     */
+    await this.ensureUserExistsById(
+      userId,
+    );
+
     const existingMembership =
       await this.databaseService.client.roomMembership.findUnique({
         where: {
           userId_roomId: {
-            userId:
-              user.id,
-
+            userId,
             roomId,
           },
         },
@@ -222,9 +201,7 @@ export class RoomsService {
 
     return this.databaseService.client.roomMembership.create({
       data: {
-        userId:
-          user.id,
-
+        userId,
         roomId,
 
         role:
@@ -238,15 +215,10 @@ export class RoomsService {
     });
   }
 
-  async leave(
+  async leaveByUserId(
     roomId: string,
-    email: string,
+    userId: string,
   ) {
-    const user =
-      await this.findUserByEmail(
-        email,
-      );
-
     const room =
       await this.databaseService.client.room.findUnique({
         where: {
@@ -262,7 +234,7 @@ export class RoomsService {
 
     if (
       room.ownerId ===
-      user.id
+      userId
     ) {
       throw new ForbiddenException(
         'Room owner cannot leave the room',
@@ -272,9 +244,7 @@ export class RoomsService {
     const result =
       await this.databaseService.client.roomMembership.deleteMany({
         where: {
-          userId:
-            user.id,
-
+          userId,
           roomId,
         },
       });
@@ -285,16 +255,11 @@ export class RoomsService {
     };
   }
 
-  async update(
+  async updateByUserId(
     roomId: string,
-    email: string,
+    userId: string,
     input: UpdateRoomDto,
   ) {
-    const user =
-      await this.findUserByEmail(
-        email,
-      );
-
     const room =
       await this.databaseService.client.room.findUnique({
         where: {
@@ -310,7 +275,7 @@ export class RoomsService {
 
     if (
       room.ownerId !==
-      user.id
+      userId
     ) {
       throw new ForbiddenException(
         'Only the room owner can update this room',
@@ -350,15 +315,10 @@ export class RoomsService {
     );
   }
 
-  async remove(
+  async removeByUserId(
     roomId: string,
-    email: string,
+    userId: string,
   ) {
-    const user =
-      await this.findUserByEmail(
-        email,
-      );
-
     const room =
       await this.databaseService.client.room.findUnique({
         where: {
@@ -374,7 +334,7 @@ export class RoomsService {
 
     if (
       room.ownerId !==
-      user.id
+      userId
     ) {
       throw new ForbiddenException(
         'Only the room owner can delete this room',
@@ -400,28 +360,25 @@ export class RoomsService {
     return {
       ...room,
 
-      /*
-       * This is database membership count,
-       * not current room occupancy.
-       */
       memberCount:
         room.memberships.length,
 
-      /*
-       * Capacity refers to active occupancy.
-       */
       capacity:
         MAX_ROOM_CAPACITY,
     };
   }
 
-  private async findUserByEmail(
-    email: string,
+  private async ensureUserExistsById(
+    userId: string,
   ) {
     const user =
       await this.databaseService.client.user.findUnique({
         where: {
-          email,
+          id: userId,
+        },
+
+        select: {
+          id: true,
         },
       });
 

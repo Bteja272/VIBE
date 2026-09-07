@@ -9,17 +9,12 @@ async function bootstrap() {
 
   app.enableCors({
     origin: 'http://localhost:3000',
-    methods: [
-      'GET',
-      'POST',
-      'PATCH',
-      'DELETE',
-      'OPTIONS',
-    ],
-    allowedHeaders: [
-      'Content-Type',
-      'x-dev-user-email',
-    ],
+
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-vibe-internal-secret'],
+
+    credentials: true,
   });
 
   app.useGlobalPipes(

@@ -1,105 +1,230 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
 
-import { socket } from "@/src/lib/socket";
-import { getPresenceId } from "@/src/lib/presence-session";
+import {
+  getVibeToken,
+} from "@/src/lib/api";
+
+import {
+  getPresenceId,
+} from "@/src/lib/presence-session";
+
+import {
+  ensureSocketConnection,
+  socket,
+} from "@/src/lib/socket";
 
 interface RoomPresenceProps {
   roomId: string;
+
+  /*
+   * true for a persistent registered
+   * owner/member.
+   *
+   * Guest entry is triggered by RoomActions.
+   */
   shouldBePresent: boolean;
-  currentUserEmail: string;
 }
 
 interface PresenceUser {
   socketId: string;
-  userEmail: string;
   presenceId: string;
+
+  userId: string;
+
+  displayName: string;
+
+  identityType:
+    | "GUEST"
+    | "REGISTERED";
+
+  email?: string;
 }
 
 interface PresenceUpdate {
   roomId: string;
-  users: PresenceUser[];
+
+  users:
+    PresenceUser[];
+
   count: number;
 }
 
 export default function RoomPresence({
   roomId,
   shouldBePresent,
-  currentUserEmail,
 }: RoomPresenceProps) {
-  const [connected, setConnected] =
+  const [
+    connected,
+    setConnected,
+  ] =
     useState(false);
 
-  const [users, setUsers] = useState<
-    PresenceUser[]
-  >([]);
+  const [
+    users,
+    setUsers,
+  ] =
+    useState<
+      PresenceUser[]
+    >([]);
 
-  const [error, setError] = useState<
-    string | null
-  >(null);
+  const [
+    error,
+    setError,
+  ] =
+    useState<
+      string | null
+    >(null);
 
   useEffect(() => {
+    let cancelled =
+      false;
+
     function watchRoom() {
       socket.emit(
         "room:watch",
         {
           roomId,
         },
-        (response: {
-          watching: boolean;
-          roomId: string;
-        }) => {
-          console.log(
-            "Watching socket room:",
-            response,
-          );
+      );
+    }
+
+    function enterRoom() {
+      socket.emit(
+        "presence:enter",
+
+        {
+          roomId,
+
+          presenceId:
+            getPresenceId(),
+        },
+
+        (
+          response: {
+            entered:
+              boolean;
+
+            error?:
+              string;
+          },
+        ) => {
+          if (
+            !response?.entered
+          ) {
+            setError(
+              response?.error ??
+                "Unable to enter room",
+            );
+          }
         },
       );
+    }
 
-      if (shouldBePresent) {
-        socket.emit(
-          "presence:enter",
-          {
-            roomId,
-            userEmail: currentUserEmail,
-            presenceId: getPresenceId(),
-          },
+    async function start() {
+      try {
+        if (
+          shouldBePresent
+        ) {
+          const auth =
+            await getVibeToken();
+
+          await ensureSocketConnection(
+            auth.token,
+          );
+        } else {
+          await ensureSocketConnection();
+        }
+
+        if (
+          cancelled
+        ) {
+          return;
+        }
+
+        setConnected(
+          true,
+        );
+
+        setError(
+          null,
+        );
+
+        watchRoom();
+
+        if (
+          shouldBePresent
+        ) {
+          enterRoom();
+        }
+      } catch (
+        err
+      ) {
+        if (
+          cancelled
+        ) {
+          return;
+        }
+
+        setError(
+          err instanceof
+            Error
+            ? err.message
+            : "Realtime connection failed",
         );
       }
     }
 
     function handleConnect() {
-      setConnected(true);
-      setError(null);
+      setConnected(
+        true,
+      );
 
       watchRoom();
+
+      if (
+        shouldBePresent
+      ) {
+        enterRoom();
+      }
     }
 
     function handleDisconnect() {
-      setConnected(false);
-      setUsers([]);
+      setConnected(
+        false,
+      );
+
+      setUsers(
+        [],
+      );
     }
 
     function handleConnectError(
       error: Error,
     ) {
-      console.error(
-        "Socket connection error:",
-        error,
+      setError(
+        error.message,
       );
-
-      setError(error.message);
     }
 
     function handlePresenceUpdate(
-      update: PresenceUpdate,
+      update:
+        PresenceUpdate,
     ) {
-      if (update.roomId !== roomId) {
+      if (
+        update.roomId !==
+        roomId
+      ) {
         return;
       }
 
-      setUsers(update.users);
+      setUsers(
+        update.users,
+      );
     }
 
     socket.on(
@@ -122,21 +247,20 @@ export default function RoomPresence({
       handlePresenceUpdate,
     );
 
-    if (socket.connected) {
-      setConnected(true);
-      watchRoom();
-    } else {
-      socket.connect();
-    }
+    void start();
 
     return () => {
+      cancelled =
+        true;
+
       /*
-       * If this browser was actively present,
-       * leaving the page should remove it.
+       * Harmless for anonymous viewers.
+       * Important for guests because their
+       * presence was entered by RoomActions.
        */
-      if (shouldBePresent) {
-        socket.emit("presence:leave");
-      }
+      socket.emit(
+        "presence:leave",
+      );
 
       socket.off(
         "connect",
@@ -163,7 +287,6 @@ export default function RoomPresence({
   }, [
     roomId,
     shouldBePresent,
-    currentUserEmail,
   ]);
 
   return (
@@ -175,8 +298,11 @@ export default function RoomPresence({
           </h2>
 
           <p className="mt-1 text-sm text-neutral-500">
-            {users.length}{" "}
-            {users.length === 1
+            {
+              users.length
+            }{" "}
+            {users.length ===
+            1
               ? "person"
               : "people"}{" "}
             here
@@ -202,26 +328,39 @@ export default function RoomPresence({
         </p>
       )}
 
-      {users.length > 0 && (
+      {users.length >
+        0 && (
         <div className="mt-5 space-y-2">
-          {users.map((user) => (
-            <div
-              key={user.presenceId}
-              className="flex items-center gap-3 rounded-xl bg-neutral-950 px-4 py-3"
-            >
-              <div className="h-2.5 w-2.5 rounded-full bg-green-400" />
+          {users.map(
+            (
+              user,
+            ) => (
+              <div
+                key={
+                  user.presenceId
+                }
+                className="flex items-center gap-3 rounded-xl bg-neutral-950 px-4 py-3"
+              >
+                <div className="h-2.5 w-2.5 rounded-full bg-green-400" />
 
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">
-                  {user.userEmail}
-                </p>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {
+                      user.displayName
+                    }
+                  </p>
 
-                <p className="text-xs text-neutral-600">
-                  Online
-                </p>
+                  <p className="text-xs text-neutral-600">
+                    {user.identityType ===
+                    "GUEST"
+                      ? "Guest"
+                      : user.email ??
+                        "Registered"}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
+            ),
+          )}
         </div>
       )}
     </section>

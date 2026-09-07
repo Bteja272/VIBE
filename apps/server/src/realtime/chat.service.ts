@@ -6,14 +6,27 @@ import {
 } from '@nestjs/common';
 
 import { ConfigService } from '@nestjs/config';
-import { createClient } from 'redis';
 import { randomUUID } from 'crypto';
+import { createClient } from 'redis';
 
 export interface ChatMessage {
   id: string;
   roomId: string;
   presenceId: string;
+
+  userId: string;
+  displayName: string;
+
+  identityType:
+    | 'GUEST'
+    | 'REGISTERED';
+
+  /*
+   * Kept temporarily for compatibility
+   * with the existing frontend chat.
+   */
   userEmail: string;
+
   content: string;
   createdAt: string;
 }
@@ -24,27 +37,36 @@ export class ChatService
 {
   private readonly redis;
 
-  private static readonly MAX_MESSAGES = 50;
+  private static readonly MAX_MESSAGES =
+    50;
+
   private static readonly MESSAGE_TTL_SECONDS =
     60 * 60 * 24;
 
   constructor(
-    private readonly configService: ConfigService,
+    private readonly configService:
+      ConfigService,
   ) {
     const redisUrl =
-      this.configService.get<string>('REDIS_URL') ??
+      this.configService.get<string>(
+        'REDIS_URL',
+      ) ??
       'redis://localhost:6379';
 
-    this.redis = createClient({
-      url: redisUrl,
-    });
+    this.redis =
+      createClient({
+        url: redisUrl,
+      });
 
-    this.redis.on('error', (error) => {
-      console.error(
-        'Redis chat error:',
-        error,
-      );
-    });
+    this.redis.on(
+      'error',
+      (error) => {
+        console.error(
+          'Redis chat error:',
+          error,
+        );
+      },
+    );
   }
 
   async onModuleInit() {
@@ -61,12 +83,23 @@ export class ChatService
     }
   }
 
-  async addMessage(input: {
-    roomId: string;
-    presenceId: string;
-    userEmail: string;
-    content: string;
-  }): Promise<ChatMessage> {
+  async addMessage(
+    input: {
+      roomId: string;
+      presenceId: string;
+
+      userId: string;
+      displayName: string;
+
+      identityType:
+        | 'GUEST'
+        | 'REGISTERED';
+
+      email?: string;
+
+      content: string;
+    },
+  ): Promise<ChatMessage> {
     const content =
       input.content.trim();
 
@@ -76,29 +109,44 @@ export class ChatService
       );
     }
 
-    if (content.length > 500) {
+    if (
+      content.length >
+      500
+    ) {
       throw new BadRequestException(
         'Message cannot exceed 500 characters',
       );
     }
 
-    const message: ChatMessage = {
-      id: randomUUID(),
+    const message:
+      ChatMessage = {
+        id:
+          randomUUID(),
 
-      roomId:
-        input.roomId,
+        roomId:
+          input.roomId,
 
-      presenceId:
-        input.presenceId,
+        presenceId:
+          input.presenceId,
 
-      userEmail:
-        input.userEmail,
+        userId:
+          input.userId,
 
-      content,
+        displayName:
+          input.displayName,
 
-      createdAt:
-        new Date().toISOString(),
-    };
+        identityType:
+          input.identityType,
+
+        userEmail:
+          input.email ??
+          input.displayName,
+
+        content,
+
+        createdAt:
+          new Date().toISOString(),
+      };
 
     const key =
       this.getChatKey(
@@ -107,21 +155,17 @@ export class ChatService
 
     await this.redis.rPush(
       key,
-      JSON.stringify(message),
+      JSON.stringify(
+        message,
+      ),
     );
 
-    /*
-     * Keep only the newest 50 messages.
-     */
     await this.redis.lTrim(
       key,
       -ChatService.MAX_MESSAGES,
       -1,
     );
 
-    /*
-     * Chat is intentionally temporary for now.
-     */
     await this.redis.expire(
       key,
       ChatService.MESSAGE_TTL_SECONDS,
@@ -132,9 +176,13 @@ export class ChatService
 
   async getHistory(
     roomId: string,
-  ): Promise<ChatMessage[]> {
+  ): Promise<
+    ChatMessage[]
+  > {
     const key =
-      this.getChatKey(roomId);
+      this.getChatKey(
+        roomId,
+      );
 
     const values =
       await this.redis.lRange(
@@ -144,15 +192,17 @@ export class ChatService
       );
 
     return values
-      .map((value) => {
-        try {
-          return JSON.parse(
-            value,
-          ) as ChatMessage;
-        } catch {
-          return null;
-        }
-      })
+      .map(
+        (value) => {
+          try {
+            return JSON.parse(
+              value,
+            ) as ChatMessage;
+          } catch {
+            return null;
+          }
+        },
+      )
       .filter(
         (
           message,
