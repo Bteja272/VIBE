@@ -10,42 +10,36 @@ export default async function HomePage() {
     <main className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto max-w-6xl px-6 py-12">
         <header className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="mb-2 text-sm uppercase tracking-[0.2em] text-neutral-500">
-            VIBE
-          </p>
+          <div>
+            <p className="mb-2 text-sm uppercase tracking-[0.2em] text-neutral-500">
+              VIBE
+            </p>
 
-          <h1 className="text-4xl font-semibold">
-            Find your room
-          </h1>
+            <h1 className="text-4xl font-semibold">Find your room</h1>
 
-          <p className="mt-3 max-w-2xl text-neutral-400">
-            Ambient spaces for studying, listening,
-            hanging out, and playing together.
-          </p>
-        </div>
+            <p className="mt-3 max-w-2xl text-neutral-400">
+              Ambient spaces for studying, listening, hanging out, and playing
+              together.
+            </p>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <AuthControls />
+          <div className="flex flex-wrap items-center gap-3">
+            <AuthControls />
 
-          <Link
-            href="/rooms/new"
-            className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950"
-          >
-            Create room
-          </Link>
-        </div>
-      </header>
+            <Link
+              href="/rooms/new"
+              className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950"
+            >
+              Create room
+            </Link>
+          </div>
+        </header>
 
         {rooms.length === 0 ? (
           <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-8">
-            <h2 className="text-xl font-medium">
-              No rooms yet
-            </h2>
+            <h2 className="text-xl font-medium">No rooms yet</h2>
 
-            <p className="mt-2 text-neutral-400">
-              Create the first VIBE room.
-            </p>
+            <p className="mt-2 text-neutral-400">Create the first VIBE room.</p>
           </section>
         ) : (
           <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -56,9 +50,7 @@ export default async function HomePage() {
                 className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6 transition hover:border-neutral-600"
               >
                 <div className="flex items-start justify-between gap-4">
-                  <h2 className="text-xl font-medium">
-                    {room.name}
-                  </h2>
+                  <h2 className="text-xl font-medium">{room.name}</h2>
 
                   <span className="rounded-full bg-neutral-800 px-3 py-1 text-xs text-neutral-400">
                     {room.visibility}
@@ -66,22 +58,16 @@ export default async function HomePage() {
                 </div>
 
                 <p className="mt-3 min-h-12 text-sm text-neutral-400">
-                  {room.description ??
-                    "No description provided."}
+                  {room.description ?? "No description provided."}
                 </p>
 
                 <div className="mt-6 flex items-center justify-between text-sm text-neutral-500">
                   <span>
-                    {room.memberships.length}{" "}
-                    {room.memberships.length === 1
-                      ? "member"
-                      : "members"}
+                    {room.memberCount}/{room.capacity}{" "}
+                    {room.memberCount === 1 ? "member" : "members"}
                   </span>
 
-                  <span>
-                    {room.owner.displayName ??
-                      room.owner.email}
-                  </span>
+                  <span>{room.owner.displayName ?? room.owner.email}</span>
                 </div>
               </Link>
             ))}

@@ -1,5 +1,4 @@
 import {
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -19,7 +18,8 @@ const MAX_ROOM_CAPACITY = 12;
 @Injectable()
 export class RoomsService {
   constructor(
-    private readonly databaseService: DatabaseService,
+    private readonly databaseService:
+      DatabaseService,
   ) {}
 
   async createByDevUser(
@@ -27,7 +27,9 @@ export class RoomsService {
     input: CreateRoomDto,
   ) {
     const user =
-      await this.findUserByEmail(email);
+      await this.findUserByEmail(
+        email,
+      );
 
     return this.create(
       user.id,
@@ -40,13 +42,18 @@ export class RoomsService {
     input: CreateRoomDto,
   ) {
     const slug =
-      this.createSlug(input.name);
+      this.createSlug(
+        input.name,
+      );
 
     const room =
       await this.databaseService.client.room.create({
         data: {
-          name: input.name,
+          name:
+            input.name,
+
           slug,
+
           description:
             input.description,
 
@@ -58,8 +65,11 @@ export class RoomsService {
 
           memberships: {
             create: {
-              userId: ownerId,
-              role: RoomRole.OWNER,
+              userId:
+                ownerId,
+
+              role:
+                RoomRole.OWNER,
             },
           },
         },
@@ -75,7 +85,9 @@ export class RoomsService {
         },
       });
 
-    return this.withCapacity(room);
+    return this.withCapacity(
+      room,
+    );
   }
 
   async findAll() {
@@ -92,12 +104,16 @@ export class RoomsService {
         },
 
         orderBy: {
-          createdAt: 'desc',
+          createdAt:
+            'desc',
         },
       });
 
-    return rooms.map((room) =>
-      this.withCapacity(room),
+    return rooms.map(
+      (room) =>
+        this.withCapacity(
+          room,
+        ),
     );
   }
 
@@ -127,7 +143,9 @@ export class RoomsService {
       );
     }
 
-    return this.withCapacity(room);
+    return this.withCapacity(
+      room,
+    );
   }
 
   async findBySlug(
@@ -156,7 +174,9 @@ export class RoomsService {
       );
     }
 
-    return this.withCapacity(room);
+    return this.withCapacity(
+      room,
+    );
   }
 
   async join(
@@ -164,25 +184,28 @@ export class RoomsService {
     email: string,
   ) {
     const user =
-      await this.findUserByEmail(email);
+      await this.findUserByEmail(
+        email,
+      );
 
     await this.ensureRoomExists(
       roomId,
     );
 
     /*
-     * Joining must remain idempotent.
+     * Database membership is independent
+     * from active Redis occupancy.
      *
-     * If this user is already a member,
-     * return the existing membership
-     * instead of applying the room-capacity
-     * check again.
+     * The Socket.IO presence:enter event
+     * decides whether the live room has space.
      */
     const existingMembership =
       await this.databaseService.client.roomMembership.findUnique({
         where: {
           userId_roomId: {
-            userId: user.id,
+            userId:
+              user.id,
+
             roomId,
           },
         },
@@ -197,27 +220,15 @@ export class RoomsService {
       return existingMembership;
     }
 
-    const memberCount =
-      await this.databaseService.client.roomMembership.count({
-        where: {
-          roomId,
-        },
-      });
-
-    if (
-      memberCount >=
-      MAX_ROOM_CAPACITY
-    ) {
-      throw new ConflictException(
-        'Room is full',
-      );
-    }
-
     return this.databaseService.client.roomMembership.create({
       data: {
-        userId: user.id,
+        userId:
+          user.id,
+
         roomId,
-        role: RoomRole.MEMBER,
+
+        role:
+          RoomRole.MEMBER,
       },
 
       include: {
@@ -232,7 +243,9 @@ export class RoomsService {
     email: string,
   ) {
     const user =
-      await this.findUserByEmail(email);
+      await this.findUserByEmail(
+        email,
+      );
 
     const room =
       await this.databaseService.client.room.findUnique({
@@ -247,15 +260,9 @@ export class RoomsService {
       );
     }
 
-    /*
-     * Owners cannot leave their membership
-     * because Room.ownerId would then point
-     * to a user who is no longer a member.
-     *
-     * Ownership transfer can be added later.
-     */
     if (
-      room.ownerId === user.id
+      room.ownerId ===
+      user.id
     ) {
       throw new ForbiddenException(
         'Room owner cannot leave the room',
@@ -265,17 +272,13 @@ export class RoomsService {
     const result =
       await this.databaseService.client.roomMembership.deleteMany({
         where: {
-          userId: user.id,
+          userId:
+            user.id,
+
           roomId,
         },
       });
 
-    /*
-     * deleteMany keeps leave idempotent.
-     *
-     * Calling leave again simply returns
-     * left: false.
-     */
     return {
       left:
         result.count > 0,
@@ -288,7 +291,9 @@ export class RoomsService {
     input: UpdateRoomDto,
   ) {
     const user =
-      await this.findUserByEmail(email);
+      await this.findUserByEmail(
+        email,
+      );
 
     const room =
       await this.databaseService.client.room.findUnique({
@@ -304,7 +309,8 @@ export class RoomsService {
     }
 
     if (
-      room.ownerId !== user.id
+      room.ownerId !==
+      user.id
     ) {
       throw new ForbiddenException(
         'Only the room owner can update this room',
@@ -349,7 +355,9 @@ export class RoomsService {
     email: string,
   ) {
     const user =
-      await this.findUserByEmail(email);
+      await this.findUserByEmail(
+        email,
+      );
 
     const room =
       await this.databaseService.client.room.findUnique({
@@ -365,7 +373,8 @@ export class RoomsService {
     }
 
     if (
-      room.ownerId !== user.id
+      room.ownerId !==
+      user.id
     ) {
       throw new ForbiddenException(
         'Only the room owner can delete this room',
@@ -388,19 +397,20 @@ export class RoomsService {
       memberships: unknown[];
     },
   >(room: T) {
-    const memberCount =
-      room.memberships.length;
-
     return {
       ...room,
 
-      memberCount,
+      /*
+       * This is database membership count,
+       * not current room occupancy.
+       */
+      memberCount:
+        room.memberships.length,
 
+      /*
+       * Capacity refers to active occupancy.
+       */
       capacity:
-        MAX_ROOM_CAPACITY,
-
-      isFull:
-        memberCount >=
         MAX_ROOM_CAPACITY,
     };
   }
@@ -450,17 +460,18 @@ export class RoomsService {
   private createSlug(
     name: string,
   ): string {
-    const base = name
-      .trim()
-      .toLowerCase()
-      .replace(
-        /[^a-z0-9]+/g,
-        '-',
-      )
-      .replace(
-        /^-+|-+$/g,
-        '',
-      );
+    const base =
+      name
+        .trim()
+        .toLowerCase()
+        .replace(
+          /[^a-z0-9]+/g,
+          '-',
+        )
+        .replace(
+          /^-+|-+$/g,
+          '',
+        );
 
     return `${base}-${Date.now()}`;
   }

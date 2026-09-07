@@ -1,11 +1,20 @@
-export type RoomVisibility = "PUBLIC" | "PRIVATE";
-export type RoomRole = "OWNER" | "MEMBER";
+export type RoomVisibility =
+  | "PUBLIC"
+  | "PRIVATE";
+
+export type RoomRole =
+  | "OWNER"
+  | "MEMBER";
 
 export interface RoomUser {
   id: string;
   email: string;
-  displayName: string | null;
-  imageUrl: string | null;
+  displayName:
+    | string
+    | null;
+  imageUrl:
+    | string
+    | null;
 }
 
 export interface RoomMembership {
@@ -21,14 +30,31 @@ export interface Room {
   id: string;
   name: string;
   slug: string;
-  description: string | null;
-  visibility: RoomVisibility;
+
+  description:
+    | string
+    | null;
+
+  visibility:
+    RoomVisibility;
+
   ownerId: string;
+
   createdAt: string;
   updatedAt: string;
+
   owner: RoomUser;
+
+  /*
+   * Persistent database memberships.
+   */
   memberCount: number;
+
+  /*
+   * Maximum ACTIVE room occupancy.
+   */
   capacity: number;
-  isFull: boolean;
-  memberships: RoomMembership[];
+
+  memberships:
+    RoomMembership[];
 }
