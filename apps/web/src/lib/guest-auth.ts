@@ -5,6 +5,9 @@ const API_URL =
 const GUEST_SESSION_KEY =
   "vibe_guest_session";
 
+const GUEST_ACTIVE_ROOM_KEY =
+  "vibe_guest_active_room";
+
 export interface GuestSession {
   token: string;
 
@@ -43,35 +46,96 @@ export function getGuestSession():
       ) as GuestSession;
 
     if (
+      !session.token ||
+      !session.user ||
       session.expiresAt <=
-      Date.now()
+        Date.now()
     ) {
-      window.sessionStorage.removeItem(
-        GUEST_SESSION_KEY,
-      );
+      clearGuestSession();
 
       return null;
     }
 
     return session;
   } catch {
-    window.sessionStorage.removeItem(
-      GUEST_SESSION_KEY,
-    );
+    clearGuestSession();
 
     return null;
   }
 }
 
+export function clearGuestSession() {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return;
+  }
+
+  window.sessionStorage.removeItem(
+    GUEST_SESSION_KEY,
+  );
+
+  window.sessionStorage.removeItem(
+    GUEST_ACTIVE_ROOM_KEY,
+  );
+}
+
+export function setGuestActiveRoom(
+  roomId: string,
+) {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return;
+  }
+
+  window.sessionStorage.setItem(
+    GUEST_ACTIVE_ROOM_KEY,
+    roomId,
+  );
+}
+
+export function getGuestActiveRoom():
+  | string
+  | null {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return null;
+  }
+
+  return window.sessionStorage.getItem(
+    GUEST_ACTIVE_ROOM_KEY,
+  );
+}
+
+export function clearGuestActiveRoom() {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return;
+  }
+
+  window.sessionStorage.removeItem(
+    GUEST_ACTIVE_ROOM_KEY,
+  );
+}
+
 export async function createGuestSession(
   displayName: string,
 ): Promise<GuestSession> {
+  const normalizedName =
+    displayName.trim();
+
   const response =
     await fetch(
       `${API_URL}/auth/guest`,
       {
-        method:
-          "POST",
+        method: "POST",
 
         headers: {
           "Content-Type":
@@ -81,7 +145,7 @@ export async function createGuestSession(
         body:
           JSON.stringify({
             displayName:
-              displayName.trim(),
+              normalizedName,
           }),
       },
     );
