@@ -1,79 +1,60 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 
-import type {
-  AuthUser,
-} from './auth-user';
+import type { AuthUser } from './auth-user';
 
-import {
-  AuthService,
-} from './auth.service';
+import { AuthService } from './auth.service';
 
-import {
-  CurrentUser,
-} from './current-user.decorator';
+import { CurrentUser } from './current-user.decorator';
 
-import {
-  JwtAuthGuard,
-} from './jwt-auth.guard';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
-import {
-  InternalAuthGuard,
-} from './internal-auth.guard';
+import { InternalAuthGuard } from './internal-auth.guard';
 
-import {
-  CreateGuestDto,
-} from './dto/create-guest.dto';
+import { CreateGuestDto } from './dto/create-guest.dto';
 
-import {
-  CreateRegisteredDto,
-} from './dto/create-registered.dto';
+import { CreateRegisteredDto } from './dto/create-registered.dto';
+
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(
-    private readonly authService:
-      AuthService,
-  ) {}
+  constructor(private readonly authService: AuthService) {}
 
   @Post('guest')
   createGuest(
     @Body()
     body: CreateGuestDto,
   ) {
-    return this.authService.createGuest(
-      body.displayName,
-    );
+    return this.authService.createGuest(body.displayName);
   }
 
-  @UseGuards(
-    InternalAuthGuard,
-  )
+  @UseGuards(InternalAuthGuard)
   @Post('registered')
   createRegistered(
     @Body()
     body: CreateRegisteredDto,
   ) {
-    return this.authService.createRegistered(
-      body,
-    );
+    return this.authService.createRegistered(body);
   }
 
-  @UseGuards(
-    JwtAuthGuard,
-  )
+  @UseGuards(JwtAuthGuard)
   @Get('me')
   getMe(
     @CurrentUser()
     user: AuthUser,
   ) {
-    return this.authService.getProfile(
-      user,
-    );
+    return this.authService.getProfile(user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('profile')
+  updateProfile(
+    @CurrentUser()
+    user: AuthUser,
+
+    @Body()
+    body: UpdateProfileDto,
+  ) {
+    return this.authService.updateRegisteredProfile(user, body.displayName);
   }
 }

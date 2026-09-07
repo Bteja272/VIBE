@@ -22,12 +22,13 @@ enum RoomRole {
 }
 
 model User {
-  id          String           @id @default(cuid())
-  email       String           @unique
-  displayName String?
-  imageUrl    String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id               String           @id @default(cuid())
+  email            String           @unique
+  displayName      String?
+  imageUrl         String?
+  profileCompleted Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   ownedRooms  Room[]           @relation("RoomOwner")
   memberships RoomMembership[]

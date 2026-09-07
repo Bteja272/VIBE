@@ -10,7 +10,7 @@ export default async function AuthControls() {
           "use server";
 
           await signIn("google", {
-            redirectTo: "/",
+            redirectTo: "/onboarding",
           });
         }}
       >
