@@ -22,6 +22,8 @@ interface RoomPresenceProps {
   roomId: string;
 
   shouldBePresent: boolean;
+
+  isOwner: boolean;
 }
 
 interface PresenceUser {
@@ -48,6 +50,7 @@ interface PresenceUpdate {
 export default function RoomPresence({
   roomId,
   shouldBePresent,
+  isOwner,
 }: RoomPresenceProps) {
   const [connected, setConnected] = useState(false);
 
@@ -210,6 +213,7 @@ export default function RoomPresence({
         users={users}
         connected={connected}
         currentUserId={currentUserId}
+        isOwner={isOwner}
         capacity={12}
       />
 

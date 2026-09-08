@@ -6,7 +6,6 @@ import { auth } from "@/auth";
 
 import OwnerRoomActions from "@/components/owner-room-actions";
 import RoomActions from "@/components/room-actions";
-import RoomMusic from "@/components/room-music";
 import RoomOccupancy from "@/components/room-occupancy";
 import RoomPresence from "@/components/room-presence";
 import VibeAvatar from "@/components/vibe-avatar";
@@ -88,6 +87,7 @@ export default async function RoomPage({ params }: RoomPageProps) {
           <RoomPresence
             roomId={room.id}
             shouldBePresent={isOwner || isMember}
+            isOwner={isOwner}
           />
         </section>
 
@@ -127,7 +127,6 @@ export default async function RoomPage({ params }: RoomPageProps) {
 
         {/* Realtime tools */}
         <section className="grid gap-6 lg:grid-cols-2">
-          <RoomMusic roomId={room.id} isOwner={isOwner} canControl={true} />
         </section>
 
         {isOwner && (

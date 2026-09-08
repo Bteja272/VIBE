@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import RoomChat from "@/components/room-chat";
 import VibeAvatar from "@/components/vibe-avatar";
+import RoomMusic from "@/components/room-music";
 
 import {
   buildSpatialSeats,
@@ -22,6 +23,8 @@ interface SpatialRoomProps {
   connected: boolean;
 
   currentUserId?: string | null;
+
+  isOwner?: boolean;
 
   capacity?: number;
 }
@@ -90,6 +93,7 @@ export default function SpatialRoom({
   users,
   connected,
   currentUserId = null,
+  isOwner = false,
   capacity = 12,
 }: SpatialRoomProps) {
   const [assignments, setAssignments] = useState<Record<string, string>>({});
@@ -97,6 +101,8 @@ export default function SpatialRoom({
   const [loaded, setLoaded] = useState(false);
 
   const [chatOpen, setChatOpen] = useState(false);
+
+  const [musicOpen, setMusicOpen] = useState(false);
 
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -315,6 +321,9 @@ export default function SpatialRoom({
   );
 
   function openChat() {
+    setMusicOpen(false);
+
+
     setChatOpen(true);
 
     setUnreadCount(0);
@@ -413,6 +422,26 @@ export default function SpatialRoom({
                 @{mentionCount}
               </span>
             )}
+          </button>
+        </div>
+
+        {/* Music control */}
+        <div className="absolute left-4 top-4 z-40">
+          <button
+            type="button"
+            onClick={() => {
+              setMusicOpen((current) => !current);
+
+              /*
+               * Avoid overlapping large controls.
+               */
+              setChatOpen(false);
+            }}
+            className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900/95 text-lg text-neutral-200 shadow-lg backdrop-blur transition hover:bg-neutral-800"
+            aria-label={musicOpen ? "Close shared music" : "Open shared music"}
+            title="Shared music"
+          >
+            <span aria-hidden="true">🔊</span>
           </button>
         </div>
 
@@ -617,6 +646,51 @@ export default function SpatialRoom({
           </>
         )}
       </div>
+      {/* Integrated music popover */}
+      {musicOpen && (
+        <>
+          <button
+            type="button"
+            aria-label="Close shared music"
+            onClick={() => setMusicOpen(false)}
+            className="absolute inset-0 z-30 bg-black/20"
+          />
+
+          <aside className="absolute left-4 top-16 z-40 w-[min(22rem,calc(100%-2rem))] overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span aria-hidden="true" className="text-lg">
+                  🔊
+                </span>
+
+                <div>
+                  <p className="font-medium">Shared music</p>
+
+                  <p className="text-xs text-neutral-500">Room listening</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setMusicOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+                aria-label="Close shared music"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-4">
+              <RoomMusic
+                roomId={roomId}
+                isOwner={isOwner}
+                canControl={Boolean(currentUserId)}
+                compact
+              />
+            </div>
+          </aside>
+        </>
+      )}
 
       <div className="border-t border-neutral-800 px-6 py-4">
         <p className="text-xs text-neutral-600">
