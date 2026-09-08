@@ -37,6 +37,12 @@ interface RoomChatProps {
   onIncomingMessage?: (message: ChatMessage) => void;
 
   onHistoryLoaded?: (messages: ChatMessage[]) => void;
+
+  prefillText?: string | null;
+
+  prefillRequestId?: number;
+
+  onPrefillConsumed?: () => void;
 }
 
 interface MentionQuery {
@@ -152,6 +158,9 @@ export default function RoomChat({
   compact = false,
   onIncomingMessage,
   onHistoryLoaded,
+  prefillText = null,
+  prefillRequestId = 0,
+  onPrefillConsumed,
 }: RoomChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
@@ -168,6 +177,48 @@ export default function RoomChat({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  /*
+ * Allows another spatial-room control
+ * to open chat with text already placed
+ * in the composer.
+ *
+ * Example:
+ *   @Chaos 
+ */
+useEffect(() => {
+  if (!prefillText || !canSend) {
+    return;
+  }
+
+  setMessage(prefillText);
+
+  setMentionQuery(null);
+
+  const frame = window.requestAnimationFrame(() => {
+    const input = inputRef.current;
+
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+
+    const cursor = prefillText.length;
+
+    input.setSelectionRange(cursor, cursor);
+  });
+
+  onPrefillConsumed?.();
+
+  return () => {
+    window.cancelAnimationFrame(frame);
+  };
+}, [
+  prefillText,
+  prefillRequestId,
+  canSend,
+  onPrefillConsumed,
+]);
 
   const mentionSuggestions = useMemo(() => {
     if (!mentionQuery) {

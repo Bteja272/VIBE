@@ -103,6 +103,14 @@ export default function SpatialRoom({
   const [chatOpen, setChatOpen] = useState(false);
 
   const [musicOpen, setMusicOpen] = useState(false);
+  const [openParticipantId, setOpenParticipantId] = useState<string | null>(
+    null,
+  );
+
+  const [chatPrefill, setChatPrefill] = useState<{
+    text: string;
+    requestId: number;
+  } | null>(null);
 
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -201,6 +209,60 @@ export default function SpatialRoom({
       window.clearTimeout(timer);
     };
   }, [mentionNotification]);
+
+  /*
+   * Close the participant card when clicking
+   * somewhere else in the spatial room.
+   *
+   * Participant menu triggers are excluded so
+   * another user's menu can be opened directly.
+   */
+  useEffect(() => {
+    if (!openParticipantId) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      if (
+        target.closest("[data-participant-menu]") ||
+        target.closest("[data-participant-menu-trigger]")
+      ) {
+        return;
+      }
+
+      setOpenParticipantId(null);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [openParticipantId]);
+
+  /*
+   * If somebody leaves while their participant
+   * menu is open, close that menu automatically.
+   */
+  useEffect(() => {
+    if (!openParticipantId) {
+      return;
+    }
+
+    const stillPresent = users.some(
+      (user) => user.userId === openParticipantId,
+    );
+
+    if (!stillPresent) {
+      setOpenParticipantId(null);
+    }
+  }, [users, openParticipantId]);
 
   const occupiedSeats = useMemo(
     () => new Set(Object.values(assignments)),
@@ -320,9 +382,38 @@ export default function SpatialRoom({
     [chatOpen, currentUser, currentUserId],
   );
 
+  function mentionParticipant(participant: SpatialParticipant) {
+    if (!currentUserId) {
+      return;
+    }
+
+    setOpenParticipantId(null);
+
+    setMusicOpen(false);
+
+    setMentionNotification(null);
+
+    setUnreadCount(0);
+
+    setMentionCount(0);
+
+    setChatPrefill({
+      text: `@${participant.displayName} `,
+
+      requestId: Date.now(),
+    });
+
+    setChatOpen(true);
+  }
+
+  const handleChatPrefillConsumed = useCallback(() => {
+    setChatPrefill(null);
+  }, []);
+
   function openChat() {
     setMusicOpen(false);
 
+    setOpenParticipantId(null);
 
     setChatOpen(true);
 
@@ -436,6 +527,8 @@ export default function SpatialRoom({
                * Avoid overlapping large controls.
                */
               setChatOpen(false);
+              setOpenParticipantId(null);
+              setMentionNotification(null);
             }}
             className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900/95 text-lg text-neutral-200 shadow-lg backdrop-blur transition hover:bg-neutral-800"
             aria-label={musicOpen ? "Close shared music" : "Open shared music"}
@@ -561,24 +654,130 @@ export default function SpatialRoom({
                   <span className="absolute -right-1 bottom-1 h-3 w-3 rounded-full border-2 border-neutral-950 bg-green-400" />
                 </div>
 
-                <div
-                  className={`relative mt-2 max-w-full rounded-lg border px-3 py-1.5 text-center shadow-lg backdrop-blur ${
-                    isCurrentUser
-                      ? "border-neutral-500 bg-neutral-900"
-                      : "border-neutral-800 bg-neutral-950/90"
-                  }`}
-                >
-                  <p className="truncate text-sm font-medium">
-                    {participant.displayName}
-                  </p>
+                <div className="relative mt-2 flex items-start gap-1">
+                  <div
+                    className={`min-w-0 max-w-full rounded-lg border px-3 py-1.5 text-center shadow-lg backdrop-blur ${
+                      isCurrentUser
+                        ? "border-neutral-500 bg-neutral-900"
+                        : "border-neutral-800 bg-neutral-950/90"
+                    }`}
+                  >
+                    <p className="truncate text-sm font-medium">
+                      {participant.displayName}
+                    </p>
 
-                  <p className="mt-0.5 text-[10px] uppercase tracking-wide text-neutral-600">
-                    {isCurrentUser
-                      ? "You"
-                      : participant.identityType === "GUEST"
-                        ? "Guest"
-                        : "Registered"}
-                  </p>
+                    <p className="mt-0.5 text-[10px] uppercase tracking-wide text-neutral-600">
+                      {isCurrentUser
+                        ? "You"
+                        : participant.identityType === "GUEST"
+                          ? "Guest"
+                          : "Registered"}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    data-participant-menu-trigger
+                    onClick={() => {
+                      setOpenParticipantId((current) =>
+                        current === participant.userId
+                          ? null
+                          : participant.userId,
+                      );
+
+                      setChatOpen(false);
+
+                      setMusicOpen(false);
+
+                      setMentionNotification(null);
+                    }}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/90 text-sm text-neutral-500 transition hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+                    aria-label={`More options for ${participant.displayName}`}
+                    title={`More options for ${participant.displayName}`}
+                  >
+                    ⋯
+                  </button>
+
+                  {openParticipantId === participant.userId && (
+                    <div
+                      data-participant-menu
+                      className="absolute left-1/2 top-[calc(100%+0.5rem)] z-50 w-56 -translate-x-1/2 overflow-hidden rounded-xl border border-neutral-700 bg-neutral-950 text-left shadow-2xl"
+                    >
+                      <div className="border-b border-neutral-800 p-3">
+                        <div className="flex items-center gap-3">
+                          <VibeAvatar
+                            avatarId={participant.avatarId}
+                            size="sm"
+                          />
+
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-neutral-100">
+                              {participant.displayName}
+                            </p>
+
+                            <p className="mt-0.5 text-xs text-neutral-500">
+                              {isCurrentUser
+                                ? `You · ${
+                                    participant.identityType === "GUEST"
+                                      ? "Guest"
+                                      : "Registered"
+                                  }`
+                                : participant.identityType === "GUEST"
+                                  ? "Guest"
+                                  : "Registered"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {isCurrentUser ? (
+                        <div className="p-3">
+                          <p className="text-xs leading-5 text-neutral-500">
+                            This is you. Click any empty seat in the room to
+                            move.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-2">
+                          <button
+                            type="button"
+                            onClick={() => mentionParticipant(participant)}
+                            disabled={!currentUserId}
+                            className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span
+                                aria-hidden="true"
+                                className="font-semibold"
+                              >
+                                @
+                              </span>
+                              Mention
+                            </span>
+
+                            <span className="text-xs text-neutral-600">
+                              Room
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled
+                            className="mt-1 flex w-full cursor-not-allowed items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm text-neutral-500 opacity-60"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span aria-hidden="true">💬</span>
+                              Message
+                            </span>
+
+                            <span className="rounded-full bg-neutral-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-500">
+                              Soon
+                            </span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <p className="mt-1 text-[10px] text-neutral-700">{seatId}</p>
@@ -640,6 +839,9 @@ export default function SpatialRoom({
                   currentUserId={currentUserId}
                   compact
                   onIncomingMessage={handleIncomingMessage}
+                  prefillText={chatPrefill?.text ?? null}
+                  prefillRequestId={chatPrefill?.requestId ?? 0}
+                  onPrefillConsumed={handleChatPrefillConsumed}
                 />
               </div>
             </aside>
