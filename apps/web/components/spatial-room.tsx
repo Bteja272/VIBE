@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import RoomChat from "@/components/room-chat";
 import VibeAvatar from "@/components/vibe-avatar";
 
 import {
@@ -10,6 +11,8 @@ import {
   SPATIAL_SEATS,
   type SpatialParticipant,
 } from "@/src/lib/spatial-layout";
+
+import type { ChatMessage } from "@/src/types/chat";
 
 interface SpatialRoomProps {
   roomId: string;
@@ -23,8 +26,63 @@ interface SpatialRoomProps {
   capacity?: number;
 }
 
+interface MentionNotification {
+  id: string;
+
+  senderName: string;
+
+  senderAvatarId?: string;
+
+  content: string;
+}
+
+interface ActiveBubble {
+  messageId: string;
+
+  content: string;
+}
+
+const BUBBLE_LIFETIME_MS = 5000;
+
+const MENTION_NOTIFICATION_LIFETIME_MS = 4000;
+
 function getStorageKey(roomId: string) {
   return `vibe_spatial_seats_${roomId}`;
+}
+
+function truncateBubble(content: string) {
+  const trimmed = content.trim();
+
+  if (trimmed.length <= 70) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, 67)}...`;
+}
+
+function truncateMentionNotification(content: string) {
+  const trimmed = content.trim();
+
+  if (trimmed.length <= 90) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, 87)}...`;
+}
+
+function messageMentionsUser(
+  message: ChatMessage,
+  currentUser: SpatialParticipant | undefined,
+) {
+  if (!currentUser) {
+    return false;
+  }
+
+  const mention = `@${currentUser.displayName}`;
+
+  return message.content
+    .toLocaleLowerCase()
+    .includes(mention.toLocaleLowerCase());
 }
 
 export default function SpatialRoom({
@@ -38,9 +96,30 @@ export default function SpatialRoom({
 
   const [loaded, setLoaded] = useState(false);
 
+  const [chatOpen, setChatOpen] = useState(false);
+
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const [mentionCount, setMentionCount] = useState(0);
+
+  const [mentionNotification, setMentionNotification] =
+    useState<MentionNotification | null>(null);
+
+  const [activeBubbles, setActiveBubbles] = useState<
+    Record<string, ActiveBubble>
+  >({});
+
+  const bubbleTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+
+  const currentUser = useMemo(
+    () => users.find((user) => user.userId === currentUserId),
+    [users, currentUserId],
+  );
+
   /*
-   * Restore this browser's previous
-   * view of room seat assignments.
+   * Restore browser-local seat assignments.
    */
   useEffect(() => {
     try {
@@ -51,8 +130,8 @@ export default function SpatialRoom({
       }
     } catch {
       /*
-       * Invalid storage should never
-       * stop room rendering.
+       * Invalid storage should not prevent
+       * the spatial room from rendering.
        */
     } finally {
       setLoaded(true);
@@ -60,8 +139,7 @@ export default function SpatialRoom({
   }, [roomId]);
 
   /*
-   * Reconcile whenever live presence
-   * changes.
+   * Keep seats stable as live presence changes.
    */
   useEffect(() => {
     if (!loaded) {
@@ -72,7 +150,7 @@ export default function SpatialRoom({
   }, [users, loaded]);
 
   /*
-   * Persist the browser-local seat map.
+   * Persist browser-local seat state.
    */
   useEffect(() => {
     if (!loaded) {
@@ -84,6 +162,39 @@ export default function SpatialRoom({
       JSON.stringify(assignments),
     );
   }, [roomId, assignments, loaded]);
+
+  /*
+   * Clean up speech-bubble timers.
+   */
+  useEffect(() => {
+    const timers = bubbleTimers.current;
+
+    return () => {
+      for (const timer of timers.values()) {
+        clearTimeout(timer);
+      }
+
+      timers.clear();
+    };
+  }, []);
+
+  /*
+   * Mention notifications are intentionally
+   * temporary and disappear after four seconds.
+   */
+  useEffect(() => {
+    if (!mentionNotification) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setMentionNotification(null);
+    }, MENTION_NOTIFICATION_LIFETIME_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [mentionNotification]);
 
   const occupiedSeats = useMemo(
     () => new Set(Object.values(assignments)),
@@ -101,7 +212,7 @@ export default function SpatialRoom({
     }
 
     /*
-     * Cannot take somebody else's seat.
+     * A participant cannot take an occupied seat.
      */
     if (occupiedSeats.has(seatId)) {
       return;
@@ -112,6 +223,109 @@ export default function SpatialRoom({
 
       [currentUserId]: seatId,
     }));
+  }
+
+  const handleIncomingMessage = useCallback(
+    (incoming: ChatMessage) => {
+      const senderUserId = incoming.userId;
+
+      /*
+       * Show the sender's newest room message
+       * temporarily above their spatial avatar.
+       *
+       * Legacy Redis messages without userId
+       * remain visible in chat but cannot be
+       * attached to an avatar reliably.
+       */
+      if (senderUserId) {
+        const existingTimer = bubbleTimers.current.get(senderUserId);
+
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
+
+        setActiveBubbles((current) => ({
+          ...current,
+
+          [senderUserId]: {
+            messageId: incoming.id,
+
+            content: truncateBubble(incoming.content),
+          },
+        }));
+
+        const timer = setTimeout(() => {
+          setActiveBubbles((current) => {
+            if (current[senderUserId]?.messageId !== incoming.id) {
+              return current;
+            }
+
+            const next = {
+              ...current,
+            };
+
+            delete next[senderUserId];
+
+            return next;
+          });
+
+          bubbleTimers.current.delete(senderUserId);
+        }, BUBBLE_LIFETIME_MS);
+
+        bubbleTimers.current.set(senderUserId, timer);
+      }
+
+      /*
+       * Your own message should never count as
+       * unread or produce a mention notification.
+       */
+      if (incoming.userId === currentUserId) {
+        return;
+      }
+
+      /*
+       * If chat is open, the message is already
+       * visible, so it is not considered unread.
+       */
+      if (chatOpen) {
+        return;
+      }
+
+      setUnreadCount((current) => current + 1);
+
+      const mentionedCurrentUser = messageMentionsUser(incoming, currentUser);
+
+      if (!mentionedCurrentUser) {
+        return;
+      }
+
+      setMentionCount((current) => current + 1);
+
+      setMentionNotification({
+        id: incoming.id,
+
+        senderName: incoming.displayName?.trim() || "Someone",
+
+        senderAvatarId: incoming.avatarId,
+
+        content: truncateMentionNotification(incoming.content),
+      });
+    },
+    [chatOpen, currentUser, currentUserId],
+  );
+
+  function openChat() {
+    setChatOpen(true);
+
+    setUnreadCount(0);
+
+    setMentionCount(0);
+
+    setMentionNotification(null);
+  }
+
+  function closeChat() {
+    setChatOpen(false);
   }
 
   return (
@@ -162,12 +376,87 @@ export default function SpatialRoom({
         {/* Floor */}
         <div className="absolute inset-x-[7%] bottom-[8%] top-[19%] rounded-[3rem] border border-neutral-800/70 bg-neutral-900/30" />
 
-        {/*
-         * Empty seats.
-         *
-         * These are clickable only for the
-         * current room participant.
-         */}
+        {/* Chat control */}
+        <div className="absolute right-4 top-4 z-40">
+          <button
+            type="button"
+            onClick={() => {
+              if (chatOpen) {
+                closeChat();
+              } else {
+                openChat();
+              }
+            }}
+            className="relative flex h-11 min-w-11 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900/95 px-3 text-sm text-neutral-200 shadow-lg backdrop-blur transition hover:bg-neutral-800"
+            aria-label={chatOpen ? "Close room chat" : "Open room chat"}
+          >
+            <span aria-hidden="true" className="text-lg">
+              💬
+            </span>
+
+            {unreadCount > 0 && (
+              <>
+                <span
+                  className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-neutral-900 bg-red-500"
+                  aria-hidden="true"
+                />
+
+                <span className="sr-only">
+                  {unreadCount} unread room{" "}
+                  {unreadCount === 1 ? "message" : "messages"}
+                </span>
+              </>
+            )}
+
+            {mentionCount > 0 && (
+              <span className="absolute -left-2 -top-2 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-bold text-neutral-950">
+                @{mentionCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Personal mention notification */}
+        {mentionNotification && !chatOpen && (
+          <button
+            type="button"
+            onClick={openChat}
+            className="absolute right-4 top-20 z-50 w-[min(20rem,calc(100%-2rem))] rounded-2xl border border-neutral-700 bg-neutral-100 px-4 py-3 text-left text-neutral-950 shadow-xl transition hover:bg-white"
+            aria-label={`${mentionNotification.senderName} mentioned you. Open room chat.`}
+          >
+            <div className="flex items-start gap-3">
+              <div className="relative shrink-0">
+                <VibeAvatar
+                  avatarId={mentionNotification.senderAvatarId}
+                  size="sm"
+                />
+
+                <span
+                  className="absolute -right-1 -top-1 text-sm"
+                  aria-hidden="true"
+                >
+                  ✨
+                </span>
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">
+                  {mentionNotification.senderName} mentioned you
+                </p>
+
+                <p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-neutral-600">
+                  {mentionNotification.content}
+                </p>
+
+                <p className="mt-2 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+                  Tap to jump into chat
+                </p>
+              </div>
+            </div>
+          </button>
+        )}
+
+        {/* Empty seats */}
         {SPATIAL_SEATS.map((seat) => {
           const occupied = occupiedSeats.has(seat.id);
 
@@ -200,20 +489,39 @@ export default function SpatialRoom({
           );
         })}
 
+        {/* Participants */}
         {renderedSeats.map(({ participant, position, seatId }) => {
           const isCurrentUser = participant.userId === currentUserId;
+
+          const bubble = activeBubbles[participant.userId];
 
           return (
             <div
               key={participant.userId}
-              className="absolute -translate-x-1/2 -translate-y-1/2 transition-[left,top] duration-500 ease-out"
+              className="absolute z-10 -translate-x-1/2 -translate-y-1/2 transition-[left,top] duration-500 ease-out"
               style={{
                 left: `${position.x}%`,
 
                 top: `${position.y}%`,
               }}
             >
-              <div className="group flex w-24 flex-col items-center sm:w-28">
+              <div className="group relative flex w-24 flex-col items-center sm:w-28">
+                {/* Temporary room-message bubble */}
+                {bubble && (
+                  <button
+                    type="button"
+                    onClick={openChat}
+                    className="absolute bottom-[calc(100%+0.65rem)] left-1/2 z-20 w-44 -translate-x-1/2 rounded-xl border border-neutral-700 bg-neutral-100 px-3 py-2 text-left text-xs leading-5 text-neutral-950 shadow-xl transition hover:bg-white"
+                    title="Open room chat"
+                  >
+                    <span className="line-clamp-3 break-words">
+                      {bubble.content}
+                    </span>
+
+                    <span className="absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-neutral-700 bg-neutral-100" />
+                  </button>
+                )}
+
                 <div className="relative">
                   <div className="absolute left-1/2 top-[82%] h-5 w-16 -translate-x-1/2 rounded-full bg-black/30 blur-md" />
 
@@ -263,13 +571,58 @@ export default function SpatialRoom({
             </div>
           </div>
         )}
+
+        {/* Integrated chat drawer */}
+        {chatOpen && (
+          <>
+            <button
+              type="button"
+              aria-label="Close room chat"
+              onClick={closeChat}
+              className="absolute inset-0 z-30 bg-black/20"
+            />
+
+            <aside className="absolute bottom-4 right-4 top-16 z-40 flex w-[min(24rem,calc(100%-2rem))] flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+                <div>
+                  <p className="font-medium">Room chat</p>
+
+                  <p className="text-xs text-neutral-500">
+                    {users.length} {users.length === 1 ? "person" : "people"}{" "}
+                    here
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeChat}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+                  aria-label="Close chat"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1">
+                <RoomChat
+                  roomId={roomId}
+                  canSend={Boolean(currentUserId)}
+                  participants={users}
+                  currentUserId={currentUserId}
+                  compact
+                  onIncomingMessage={handleIncomingMessage}
+                />
+              </div>
+            </aside>
+          </>
+        )}
       </div>
 
       <div className="border-t border-neutral-800 px-6 py-4">
         <p className="text-xs text-neutral-600">
           {currentUserId
-            ? "Click any empty seat to move. Your seat stays stable while you remain in the room."
-            : "Join the room to choose a seat."}
+            ? "Click an empty seat to move. Use chat to talk with everyone in the room."
+            : "Join the room to choose a seat and chat."}
         </p>
       </div>
     </section>

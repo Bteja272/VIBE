@@ -6,7 +6,6 @@ import { auth } from "@/auth";
 
 import OwnerRoomActions from "@/components/owner-room-actions";
 import RoomActions from "@/components/room-actions";
-import RoomChat from "@/components/room-chat";
 import RoomMusic from "@/components/room-music";
 import RoomOccupancy from "@/components/room-occupancy";
 import RoomPresence from "@/components/room-presence";
@@ -129,8 +128,6 @@ export default async function RoomPage({ params }: RoomPageProps) {
         {/* Realtime tools */}
         <section className="grid gap-6 lg:grid-cols-2">
           <RoomMusic roomId={room.id} isOwner={isOwner} canControl={true} />
-
-          <RoomChat roomId={room.id} canSend={true} />
         </section>
 
         {isOwner && (

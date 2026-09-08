@@ -223,6 +223,10 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
 
     for (const [presenceId, value] of Object.entries(entries)) {
       try {
+        if (typeof value !== 'string') {
+          continue;
+        }
+
         const user = JSON.parse(value) as PresenceUser;
 
         /*
