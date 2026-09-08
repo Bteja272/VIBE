@@ -1,6 +1,8 @@
 import type { Room } from "@/types/room";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:4000";
 
 export interface VibeTokenResponse {
   token: string;
@@ -13,28 +15,40 @@ export interface VibeTokenResponse {
     id: string;
     displayName: string;
 
-    type: "GUEST" | "REGISTERED";
+    type:
+      | "GUEST"
+      | "REGISTERED";
 
     email?: string;
     imageUrl?: string;
+    avatarId?: string;
   };
 }
 
 export async function getRooms(): Promise<Room[]> {
-  const response = await fetch(`${API_URL}/rooms`, {
-    cache: "no-store",
-  });
+  const response = await fetch(
+    `${API_URL}/rooms`,
+    {
+      cache: "no-store",
+    },
+  );
 
   if (!response.ok) {
-    throw new Error(`Failed to load rooms: ${response.status}`);
+    throw new Error(
+      `Failed to load rooms: ${response.status}`,
+    );
   }
 
   return response.json();
 }
 
-export async function getRoomBySlug(slug: string): Promise<Room | null> {
+export async function getRoomBySlug(
+  slug: string,
+): Promise<Room | null> {
   const response = await fetch(
-    `${API_URL}/rooms/slug/${encodeURIComponent(slug)}`,
+    `${API_URL}/rooms/slug/${encodeURIComponent(
+      slug,
+    )}`,
     {
       cache: "no-store",
     },
@@ -45,25 +59,37 @@ export async function getRoomBySlug(slug: string): Promise<Room | null> {
   }
 
   if (!response.ok) {
-    throw new Error(`Failed to load room: ${response.status}`);
+    throw new Error(
+      `Failed to load room: ${response.status}`,
+    );
   }
 
   return response.json();
 }
 
 export async function getVibeToken(): Promise<VibeTokenResponse> {
-  const response = await fetch("/api/auth/vibe-token", {
-    cache: "no-store",
-  });
+  const response = await fetch(
+    "/api/auth/vibe-token",
+    {
+      cache: "no-store",
+    },
+  );
 
-  const body = await response.json().catch(() => null);
+  const body = await response
+    .json()
+    .catch(() => null);
 
   if (!response.ok) {
-    throw new Error(body?.message ?? "You must sign in first");
+    throw new Error(
+      body?.message ??
+        "You must sign in first",
+    );
   }
 
   if (!body?.token) {
-    throw new Error("Authentication token was not returned");
+    throw new Error(
+      "Authentication token was not returned",
+    );
   }
 
   return body as VibeTokenResponse;
@@ -73,47 +99,80 @@ export async function createRoom(
   input: {
     name: string;
     description?: string;
-    visibility: "PUBLIC" | "PRIVATE";
+    visibility:
+      | "PUBLIC"
+      | "PRIVATE";
   },
   token: string,
 ) {
-  const response = await fetch(`${API_URL}/rooms`, {
-    method: "POST",
+  const response = await fetch(
+    `${API_URL}/rooms`,
+    {
+      method: "POST",
 
-    headers: {
-      "Content-Type": "application/json",
+      headers: {
+        "Content-Type":
+          "application/json",
 
-      Authorization: `Bearer ${token}`,
+        Authorization:
+          `Bearer ${token}`,
+      },
+
+      body:
+        JSON.stringify(
+          input,
+        ),
     },
+  );
 
-    body: JSON.stringify(input),
-  });
-
-  return readApiResponse(response, "Failed to create room");
+  return readApiResponse(
+    response,
+    "Failed to create room",
+  );
 }
 
-export async function joinRoom(roomId: string, token: string) {
-  const response = await fetch(`${API_URL}/rooms/${roomId}/join`, {
-    method: "POST",
+export async function joinRoom(
+  roomId: string,
+  token: string,
+) {
+  const response = await fetch(
+    `${API_URL}/rooms/${roomId}/join`,
+    {
+      method: "POST",
 
-    headers: {
-      Authorization: `Bearer ${token}`,
+      headers: {
+        Authorization:
+          `Bearer ${token}`,
+      },
     },
-  });
+  );
 
-  return readApiResponse(response, "Failed to join room");
+  return readApiResponse(
+    response,
+    "Failed to join room",
+  );
 }
 
-export async function leaveRoom(roomId: string, token: string) {
-  const response = await fetch(`${API_URL}/rooms/${roomId}/leave`, {
-    method: "DELETE",
+export async function leaveRoom(
+  roomId: string,
+  token: string,
+) {
+  const response = await fetch(
+    `${API_URL}/rooms/${roomId}/leave`,
+    {
+      method: "DELETE",
 
-    headers: {
-      Authorization: `Bearer ${token}`,
+      headers: {
+        Authorization:
+          `Bearer ${token}`,
+      },
     },
-  });
+  );
 
-  return readApiResponse(response, "Failed to leave room");
+  return readApiResponse(
+    response,
+    "Failed to leave room",
+  );
 }
 
 export async function updateRoom(
@@ -122,78 +181,178 @@ export async function updateRoom(
   input: {
     name: string;
     description?: string;
-    visibility: "PUBLIC" | "PRIVATE";
+    visibility:
+      | "PUBLIC"
+      | "PRIVATE";
   },
 
   token: string,
 ) {
-  const response = await fetch(`${API_URL}/rooms/${roomId}`, {
-    method: "PATCH",
+  const response = await fetch(
+    `${API_URL}/rooms/${roomId}`,
+    {
+      method: "PATCH",
 
-    headers: {
-      "Content-Type": "application/json",
+      headers: {
+        "Content-Type":
+          "application/json",
 
-      Authorization: `Bearer ${token}`,
+        Authorization:
+          `Bearer ${token}`,
+      },
+
+      body:
+        JSON.stringify(
+          input,
+        ),
     },
+  );
 
-    body: JSON.stringify(input),
-  });
-
-  return readApiResponse(response, "Failed to update room");
+  return readApiResponse(
+    response,
+    "Failed to update room",
+  );
 }
 
 export async function updateVibeProfile(
   displayName: string,
   token: string,
 ): Promise<VibeTokenResponse> {
-  const response = await fetch(`${API_URL}/auth/profile`, {
-    method: "PATCH",
+  const response = await fetch(
+    `${API_URL}/auth/profile`,
+    {
+      method: "PATCH",
 
-    headers: {
-      "Content-Type": "application/json",
+      headers: {
+        "Content-Type":
+          "application/json",
 
-      Authorization: `Bearer ${token}`,
+        Authorization:
+          `Bearer ${token}`,
+      },
+
+      body:
+        JSON.stringify({
+          displayName:
+            displayName.trim(),
+        }),
     },
+  );
 
-    body: JSON.stringify({
-      displayName: displayName.trim(),
-    }),
-  });
-
-  const body = await response.json().catch(() => null);
+  const body = await response
+    .json()
+    .catch(() => null);
 
   if (!response.ok) {
-    const message = Array.isArray(body?.message)
-      ? body.message.join(", ")
-      : body?.message;
+    const message =
+      Array.isArray(
+        body?.message,
+      )
+        ? body.message.join(
+            ", ",
+          )
+        : body?.message;
 
-    throw new Error(message ?? "Unable to update profile");
+    throw new Error(
+      message ??
+        "Unable to update profile",
+    );
   }
 
   return body as VibeTokenResponse;
 }
 
-export async function deleteRoom(roomId: string, token: string) {
-  const response = await fetch(`${API_URL}/rooms/${roomId}`, {
-    method: "DELETE",
+export async function updateVibeAvatar(
+  avatarId: string,
+  token: string,
+): Promise<VibeTokenResponse> {
+  const response = await fetch(
+    `${API_URL}/auth/avatar`,
+    {
+      method: "PATCH",
 
-    headers: {
-      Authorization: `Bearer ${token}`,
+      headers: {
+        "Content-Type":
+          "application/json",
+
+        Authorization:
+          `Bearer ${token}`,
+      },
+
+      body:
+        JSON.stringify({
+          avatarId,
+        }),
     },
-  });
+  );
 
-  return readApiResponse(response, "Failed to delete room");
-}
-
-async function readApiResponse(response: Response, fallback: string) {
-  const body = await response.json().catch(() => null);
+  const body = await response
+    .json()
+    .catch(() => null);
 
   if (!response.ok) {
-    const message = Array.isArray(body?.message)
-      ? body.message.join(", ")
-      : body?.message;
+    const message =
+      Array.isArray(
+        body?.message,
+      )
+        ? body.message.join(
+            ", ",
+          )
+        : body?.message;
 
-    throw new Error(message ?? `${fallback}: ${response.status}`);
+    throw new Error(
+      message ??
+        "Unable to update avatar",
+    );
+  }
+
+  return body as VibeTokenResponse;
+}
+
+export async function deleteRoom(
+  roomId: string,
+  token: string,
+) {
+  const response = await fetch(
+    `${API_URL}/rooms/${roomId}`,
+    {
+      method: "DELETE",
+
+      headers: {
+        Authorization:
+          `Bearer ${token}`,
+      },
+    },
+  );
+
+  return readApiResponse(
+    response,
+    "Failed to delete room",
+  );
+}
+
+async function readApiResponse(
+  response: Response,
+  fallback: string,
+) {
+  const body = await response
+    .json()
+    .catch(() => null);
+
+  if (!response.ok) {
+    const message =
+      Array.isArray(
+        body?.message,
+      )
+        ? body.message.join(
+            ", ",
+          )
+        : body?.message;
+
+    throw new Error(
+      message ??
+        `${fallback}: ${response.status}`,
+    );
   }
 
   return body;

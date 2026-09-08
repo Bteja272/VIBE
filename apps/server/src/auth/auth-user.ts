@@ -1,26 +1,37 @@
-export type IdentityType =
-  | 'GUEST'
-  | 'REGISTERED';
+export type IdentityType = 'GUEST' | 'REGISTERED';
 
 export interface AuthUser {
   id: string;
+
   displayName: string;
+
   type: IdentityType;
 
   email?: string;
+
   imageUrl?: string;
+
+  avatarId?: string;
 }
 
 export interface VibeJwtPayload {
   sub: string;
+
   displayName: string;
+
   type: IdentityType;
 
   email?: string;
+
   imageUrl?: string;
 
+  avatarId?: string;
+
   iat?: number;
+
   exp?: number;
+
   iss?: string;
+
   aud?: string;
 }

@@ -16,6 +16,8 @@ import { CreateRegisteredDto } from './dto/create-registered.dto';
 
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
+import { UpdateAvatarDto } from './dto/update-avatar.dto';
+
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -25,7 +27,7 @@ export class AuthController {
     @Body()
     body: CreateGuestDto,
   ) {
-    return this.authService.createGuest(body.displayName);
+    return this.authService.createGuest(body.displayName, body.avatarId);
   }
 
   @UseGuards(InternalAuthGuard)
@@ -56,5 +58,17 @@ export class AuthController {
     body: UpdateProfileDto,
   ) {
     return this.authService.updateRegisteredProfile(user, body.displayName);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('avatar')
+  updateAvatar(
+    @CurrentUser()
+    user: AuthUser,
+
+    @Body()
+    body: UpdateAvatarDto,
+  ) {
+    return this.authService.updateRegisteredAvatar(user, body.avatarId);
   }
 }

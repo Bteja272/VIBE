@@ -26,6 +26,7 @@ model User {
   email            String           @unique
   displayName      String?
   imageUrl         String?
+  avatarId         String?
   profileCompleted Boolean          @default(false)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
@@ -35,14 +36,14 @@ model User {
 }
 
 model Room {
-  id          String           @id @default(cuid())
+  id          String         @id @default(cuid())
   name        String
-  slug        String           @unique
+  slug        String         @unique
   description String?
-  visibility  RoomVisibility   @default(PRIVATE)
+  visibility  RoomVisibility @default(PRIVATE)
   ownerId     String
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   owner       User             @relation("RoomOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   memberships RoomMembership[]

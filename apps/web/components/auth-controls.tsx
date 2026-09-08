@@ -4,7 +4,13 @@ import {
   signOut,
 } from "@/auth";
 
-export default async function AuthControls() {
+interface AuthControlsProps {
+  className?: string;
+}
+
+export default async function AuthControls({
+  className,
+}: AuthControlsProps) {
   const session =
     await auth();
 
@@ -13,6 +19,9 @@ export default async function AuthControls() {
   ) {
     return (
       <form
+        className={
+          className
+        }
         action={async () => {
           "use server";
 
@@ -36,56 +45,25 @@ export default async function AuthControls() {
   }
 
   return (
-    <div className="flex items-center gap-4">
-      {session.user.image && (
-        <img
-          src={
-            session.user.image
-          }
-          alt=""
-          width={
-            40
-          }
-          height={
-            40
-          }
-          className="h-10 w-10 rounded-full"
-        />
-      )}
+    <form
+      className={
+        className
+      }
+      action={async () => {
+        "use server";
 
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-neutral-100">
-          {session.user.name ??
-            session.user.email}
-        </p>
-
-        {session.user.email && (
-          <p className="truncate text-xs text-neutral-500">
-            {
-              session.user
-                .email
-            }
-          </p>
-        )}
-      </div>
-
-      <form
-        action={async () => {
-          "use server";
-
-          await signOut({
-            redirectTo:
-              "/",
-          });
-        }}
+        await signOut({
+          redirectTo:
+            "/",
+        });
+      }}
+    >
+      <button
+        type="submit"
+        className="rounded-lg border border-neutral-700 px-4 py-2 text-sm font-medium transition hover:border-neutral-500"
       >
-        <button
-          type="submit"
-          className="rounded-lg border border-neutral-700 px-3 py-2 text-sm transition hover:border-neutral-500"
-        >
-          Sign out
-        </button>
-      </form>
-    </div>
+        Sign out
+      </button>
+    </form>
   );
 }

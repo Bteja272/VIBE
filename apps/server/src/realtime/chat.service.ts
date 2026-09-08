@@ -21,6 +21,8 @@ export interface ChatMessage {
     | 'GUEST'
     | 'REGISTERED';
 
+  avatarId?: string;
+
   /*
    * Kept temporarily for compatibility
    * with the existing frontend chat.
@@ -97,6 +99,8 @@ export class ChatService
 
       email?: string;
 
+      avatarId?: string;
+
       content: string;
     },
   ): Promise<ChatMessage> {
@@ -137,6 +141,9 @@ export class ChatService
 
         identityType:
           input.identityType,
+
+        avatarId:
+          input.avatarId,
 
         userEmail:
           input.email ??

@@ -15,6 +15,9 @@ export interface RoomUser {
   imageUrl:
     | string
     | null;
+  avatarId:
+    | string
+    | null;
 }
 
 export interface RoomMembership {
@@ -44,6 +47,7 @@ export interface Room {
   updatedAt: string;
 
   owner: RoomUser;
+  
 
   /*
    * Persistent database memberships.

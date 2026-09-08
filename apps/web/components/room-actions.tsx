@@ -18,7 +18,12 @@ import {
 
 import { getPresenceId } from "@/src/lib/presence-session";
 
-import { ensureSocketConnection, socket } from "@/src/lib/socket";
+import {
+  ensureSocketConnection,
+  socket,
+  startPresenceHeartbeat,
+  stopPresenceHeartbeat,
+} from "@/src/lib/socket";
 
 interface RoomActionsProps {
   roomId: string;
@@ -96,6 +101,7 @@ export default function RoomActions({
 
             return;
           }
+          startPresenceHeartbeat();
 
           resolve();
         },
@@ -140,6 +146,7 @@ export default function RoomActions({
       const auth = await getVibeToken();
 
       await leaveRoom(roomId, auth.token);
+      stopPresenceHeartbeat();
 
       socket.emit("presence:leave");
 
@@ -181,6 +188,7 @@ export default function RoomActions({
     socket.emit("presence:leave");
 
     clearGuestActiveRoom();
+    stopPresenceHeartbeat();
 
     setGuestJoined(false);
   }

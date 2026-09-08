@@ -5,7 +5,8 @@ import {
 } from "@/auth";
 
 import AuthControls from "@/components/auth-controls";
-import GuestEntry from "@/components/guest-entry";
+import HomeIdentityShell from "@/components/home-identity-shell";
+import RegisteredIdentity from "@/components/registered-identity";
 
 import {
   getRooms,
@@ -49,8 +50,8 @@ export default async function HomePage() {
             </div>
 
             {isSignedIn && (
-              <div className="flex flex-wrap items-center gap-3">
-                <AuthControls />
+              <div className="flex flex-wrap items-center gap-4">
+                <RegisteredIdentity />
 
                 <Link
                   href="/rooms/new"
@@ -58,47 +59,19 @@ export default async function HomePage() {
                 >
                   Create room
                 </Link>
+
+                <AuthControls />
               </div>
             )}
           </div>
         </header>
 
         {!isSignedIn && (
-          <section className="py-10">
-            <div className="mb-5">
-              <h2 className="text-2xl font-semibold">
-                Enter VIBE
-              </h2>
-
-              <p className="mt-2 text-sm text-neutral-500">
-                Use an account for persistent
-                rooms, or jump in as a guest.
-              </p>
-            </div>
-
-            <div className="grid gap-5 md:grid-cols-2">
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
-                <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
-                  Persistent identity
-                </p>
-
-                <h2 className="mt-2 text-lg font-medium">
-                  Continue with Google
-                </h2>
-
-                <p className="mt-1 min-h-10 text-sm text-neutral-500">
-                  Create rooms, keep memberships,
-                  and preserve your VIBE profile.
-                </p>
-
-                <div className="mt-4">
-                  <AuthControls />
-                </div>
-              </div>
-
-              <GuestEntry />
-            </div>
-          </section>
+          <HomeIdentityShell
+            googleControl={
+              <AuthControls />
+            }
+          />
         )}
 
         <section
@@ -118,13 +91,6 @@ export default async function HomePage() {
                 Explore spaces
               </h2>
             </div>
-
-            {!isSignedIn && (
-              <p className="hidden text-sm text-neutral-500 sm:block">
-                Guests can join any accessible
-                room.
-              </p>
-            )}
           </div>
 
           {rooms.length ===
@@ -135,8 +101,8 @@ export default async function HomePage() {
               </h3>
 
               <p className="mt-2 text-neutral-400">
-                Sign in with Google to create
-                the first VIBE room.
+                Registered users can create
+                persistent VIBE rooms.
               </p>
             </div>
           ) : (
@@ -185,8 +151,7 @@ export default async function HomePage() {
                       <span className="truncate">
                         {room.owner
                           .displayName ??
-                          room.owner
-                            .email}
+                          "VIBE user"}
                       </span>
                     </div>
 

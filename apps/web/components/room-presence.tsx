@@ -2,22 +2,24 @@
 
 import { useEffect, useState } from "react";
 
+import VibeAvatar from "@/components/vibe-avatar";
+
 import { getVibeToken } from "@/src/lib/api";
+
+import { getGuestActiveRoom, getGuestSession } from "@/src/lib/guest-auth";
 
 import { getPresenceId } from "@/src/lib/presence-session";
 
-import { ensureSocketConnection, socket } from "@/src/lib/socket";
-import { getGuestActiveRoom, getGuestSession } from "@/src/lib/guest-auth";
+import {
+  ensureSocketConnection,
+  socket,
+  startPresenceHeartbeat,
+  stopPresenceHeartbeat,
+} from "@/src/lib/socket";
 
 interface RoomPresenceProps {
   roomId: string;
 
-  /*
-   * true for a persistent registered
-   * owner/member.
-   *
-   * Guest entry is triggered by RoomActions.
-   */
   shouldBePresent: boolean;
 }
 
@@ -31,7 +33,7 @@ interface PresenceUser {
 
   identityType: "GUEST" | "REGISTERED";
 
-  email?: string;
+  avatarId?: string;
 }
 
 interface PresenceUpdate {
@@ -71,14 +73,14 @@ export default function RoomPresence({
           presenceId: getPresenceId(),
         },
 
-        (response: {
-          entered: boolean;
-
-          error?: string;
-        }) => {
+        (response: { entered: boolean; error?: string }) => {
           if (!response?.entered) {
             setError(response?.error ?? "Unable to enter room");
+
+            return;
           }
+
+          startPresenceHeartbeat();
         },
       );
     }
@@ -172,11 +174,6 @@ export default function RoomPresence({
     return () => {
       cancelled = true;
 
-      /*
-       * Harmless for anonymous viewers.
-       * Important for guests because their
-       * presence was entered by RoomActions.
-       */
       socket.emit("presence:leave");
 
       socket.off("connect", handleConnect);
@@ -186,6 +183,9 @@ export default function RoomPresence({
       socket.off("connect_error", handleConnectError);
 
       socket.off("presence:update", handlePresenceUpdate);
+      stopPresenceHeartbeat();
+
+      socket.emit("presence:leave");
 
       socket.disconnect();
     };
@@ -220,19 +220,22 @@ export default function RoomPresence({
               key={user.presenceId}
               className="flex items-center gap-3 rounded-xl bg-neutral-950 px-4 py-3"
             >
-              <div className="h-2.5 w-2.5 rounded-full bg-green-400" />
+              <VibeAvatar avatarId={user.avatarId} size="sm" />
 
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
                   {user.displayName}
                 </p>
 
                 <p className="text-xs text-neutral-600">
-                  {user.identityType === "GUEST"
-                    ? "Guest"
-                    : (user.email ?? "Registered")}
+                  {user.identityType === "GUEST" ? "Guest" : "Registered"}
                 </p>
               </div>
+
+              <div
+                className="h-2.5 w-2.5 rounded-full bg-green-400"
+                title="Online"
+              />
             </div>
           ))}
         </div>

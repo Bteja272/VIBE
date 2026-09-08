@@ -1,10 +1,6 @@
-import {
-  BadRequestException,
-} from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 
-import {
-  JwtService,
-} from '@nestjs/jwt';
+import { JwtService } from '@nestjs/jwt';
 
 import {
   ConnectedSocket,
@@ -17,28 +13,15 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 
-import type {
-  Server,
-  Socket,
-} from 'socket.io';
+import type { Server, Socket } from 'socket.io';
 
-import type {
-  AuthUser,
-  VibeJwtPayload,
-} from '../auth/auth-user';
+import type { AuthUser, VibeJwtPayload } from '../auth/auth-user';
 
-import {
-  ChatService,
-} from './chat.service';
+import { ChatService } from './chat.service';
 
-import {
-  MusicService,
-  type MusicPermission,
-} from './music.service';
+import { MusicService, type MusicPermission } from './music.service';
 
-import {
-  PresenceService,
-} from './presence.service';
+import { PresenceService } from './presence.service';
 
 interface RoomPayload {
   roomId: string;
@@ -60,42 +43,31 @@ interface MusicSetPayload {
 }
 
 interface MusicPermissionPayload {
-  permission:
-    MusicPermission;
+  permission: MusicPermission;
 }
 
 @WebSocketGateway({
   cors: {
-    origin:
-      'http://localhost:3000',
+    origin: 'http://localhost:3000',
   },
 })
 export class RealtimeGateway
-  implements
-    OnGatewayInit<Server>,
-    OnGatewayConnection,
-    OnGatewayDisconnect
+  implements OnGatewayInit<Server>, OnGatewayConnection, OnGatewayDisconnect
 {
   @WebSocketServer()
   server: Server;
 
   constructor(
-    private readonly jwtService:
-      JwtService,
+    private readonly jwtService: JwtService,
 
-    private readonly presenceService:
-      PresenceService,
+    private readonly presenceService: PresenceService,
 
-    private readonly chatService:
-      ChatService,
+    private readonly chatService: ChatService,
 
-    private readonly musicService:
-      MusicService,
+    private readonly musicService: MusicService,
   ) {}
 
-  afterInit(
-    server: Server,
-  ) {
+  afterInit(server: Server) {
     /*
      * Socket authentication is optional.
      *
@@ -103,121 +75,69 @@ export class RealtimeGateway
      *
      * A provided JWT must be valid.
      */
-    server.use(
-      async (
-        client,
-        next,
-      ) => {
-        const token =
-          client.handshake.auth?.token;
+    server.use(async (client, next) => {
+      const token = client.handshake.auth?.token;
 
-        if (
-          typeof token !==
-            'string' ||
-          !token
-        ) {
-          next();
+      if (typeof token !== 'string' || !token) {
+        next();
+        return;
+      }
+
+      try {
+        const payload = await this.jwtService.verifyAsync<VibeJwtPayload>(
+          token,
+          {
+            issuer: 'vibe-auth',
+
+            audience: 'vibe-api',
+          },
+        );
+
+        if (!payload.sub || !payload.displayName || !payload.type) {
+          next(new Error('Invalid authentication token'));
+
           return;
         }
 
-        try {
-          const payload =
-            await this.jwtService.verifyAsync<VibeJwtPayload>(
-              token,
-              {
-                issuer:
-                  'vibe-auth',
+        if (payload.type !== 'GUEST' && payload.type !== 'REGISTERED') {
+          next(new Error('Invalid identity type'));
 
-                audience:
-                  'vibe-api',
-              },
-            );
-
-          if (
-            !payload.sub ||
-            !payload.displayName ||
-            !payload.type
-          ) {
-            next(
-              new Error(
-                'Invalid authentication token',
-              ),
-            );
-
-            return;
-          }
-
-          if (
-            payload.type !==
-              'GUEST' &&
-            payload.type !==
-              'REGISTERED'
-          ) {
-            next(
-              new Error(
-                'Invalid identity type',
-              ),
-            );
-
-            return;
-          }
-
-          const user:
-            AuthUser = {
-              id:
-                payload.sub,
-
-              displayName:
-                payload.displayName,
-
-              type:
-                payload.type,
-
-              email:
-                payload.email,
-
-              imageUrl:
-                payload.imageUrl,
-            };
-
-          client.data.user =
-            user;
-
-          next();
-        } catch {
-          next(
-            new Error(
-              'Invalid or expired authentication token',
-            ),
-          );
+          return;
         }
-      },
-    );
+
+        const user: AuthUser = {
+          id: payload.sub,
+
+          displayName: payload.displayName,
+
+          type: payload.type,
+
+          email: payload.email,
+
+          imageUrl: payload.imageUrl,
+          avatarId: payload.avatarId,
+        };
+
+        client.data.user = user;
+
+        next();
+      } catch {
+        next(new Error('Invalid or expired authentication token'));
+      }
+    });
   }
 
-  handleConnection(
-    client: Socket,
-  ) {
-    console.log(
-      `Socket connected: ${client.id}`,
-    );
+  handleConnection(client: Socket) {
+    console.log(`Socket connected: ${client.id}`);
   }
 
-  async handleDisconnect(
-    client: Socket,
-  ) {
-    console.log(
-      `Socket disconnected: ${client.id}`,
-    );
+  async handleDisconnect(client: Socket) {
+    console.log(`Socket disconnected: ${client.id}`);
 
-    await this.removeFromPresence(
-      client,
-    );
+    await this.removeFromPresence(client);
   }
 
-  @SubscribeMessage(
-    'room:watch',
-  )
+  @SubscribeMessage('room:watch')
   async handleWatchRoom(
     @ConnectedSocket()
     client: Socket,
@@ -225,84 +145,55 @@ export class RealtimeGateway
     @MessageBody()
     payload: RoomPayload,
   ) {
-    const roomChannel =
-      this.getRoomChannel(
-        payload.roomId,
-      );
+    const roomChannel = this.getRoomChannel(payload.roomId);
 
-    await client.join(
-      roomChannel,
-    );
+    await client.join(roomChannel);
 
-    client.data.watchingRoomId =
-      payload.roomId;
+    client.data.watchingRoomId = payload.roomId;
 
-    await this.broadcastPresence(
-      payload.roomId,
-    );
+    await this.broadcastPresence(payload.roomId);
+
+    await this.presenceService.removeStaleUsers(payload.roomId);
 
     return {
-      watching:
-        true,
+      watching: true,
 
-      roomId:
-        payload.roomId,
+      roomId: payload.roomId,
     };
   }
 
-  @SubscribeMessage(
-    'presence:enter',
-  )
+  @SubscribeMessage('presence:enter')
   async handleEnterPresence(
     @ConnectedSocket()
     client: Socket,
 
     @MessageBody()
-    payload:
-      EnterPresencePayload,
+    payload: EnterPresencePayload,
   ) {
-    const user =
-      client.data.user as
-        | AuthUser
-        | undefined;
+    const user = client.data.user as AuthUser | undefined;
 
     if (!user) {
       return {
-        entered:
-          false,
+        entered: false,
 
-        roomId:
-          payload.roomId,
+        roomId: payload.roomId,
 
-        error:
-          'Authentication required to enter the room',
+        error: 'Authentication required to enter the room',
       };
     }
 
-    const roomChannel =
-      this.getRoomChannel(
-        payload.roomId,
-      );
+    const roomChannel = this.getRoomChannel(payload.roomId);
 
-    await client.join(
-      roomChannel,
-    );
+    await client.join(roomChannel);
 
-    const previousRoomId =
-      client.data.roomId as
-        | string
-        | undefined;
+    const previousRoomId = client.data.roomId as string | undefined;
 
-    const previousPresenceId =
-      client.data.presenceId as
-        | string
-        | undefined;
+    const previousPresenceId = client.data.presenceId as string | undefined;
 
     if (
       previousRoomId &&
       previousPresenceId &&
-      previousRoomId !==
-        payload.roomId
+      previousRoomId !== payload.roomId
     ) {
       await this.presenceService.removeUser(
         previousRoomId,
@@ -310,120 +201,118 @@ export class RealtimeGateway
         client.id,
       );
 
-      await this.broadcastPresence(
-        previousRoomId,
-      );
+      await this.broadcastPresence(previousRoomId);
     }
 
-    const entered =
-      await this.presenceService.addUser(
-        payload.roomId,
-        {
-          presenceId:
-            payload.presenceId,
+    const entered = await this.presenceService.addUser(payload.roomId, {
+      presenceId: payload.presenceId,
 
-          socketId:
-            client.id,
+      socketId: client.id,
 
-          userId:
-            user.id,
+      userId: user.id,
 
-          displayName:
-            user.displayName,
+      displayName: user.displayName,
 
-          identityType:
-            user.type,
+      identityType: user.type,
 
-          email:
-            user.email,
-        },
-      );
+      email: user.email,
+      avatarId: user.avatarId,
+    });
 
     if (!entered) {
       return {
-        entered:
-          false,
+        entered: false,
 
-        roomId:
-          payload.roomId,
+        roomId: payload.roomId,
 
-        error:
-          'Room is full',
+        error: 'Room is full',
       };
     }
 
-    client.data.roomId =
-      payload.roomId;
+    client.data.roomId = payload.roomId;
 
-    client.data.presenceId =
-      payload.presenceId;
+    client.data.presenceId = payload.presenceId;
 
-    await this.broadcastPresence(
-      payload.roomId,
-    );
+    await this.broadcastPresence(payload.roomId);
 
     return {
-      entered:
-        true,
+      entered: true,
 
-      roomId:
-        payload.roomId,
+      roomId: payload.roomId,
+    };
+  }
+  @SubscribeMessage('presence:heartbeat')
+  async handlePresenceHeartbeat(
+    @ConnectedSocket()
+    client: Socket,
+  ) {
+    const roomId = client.data.roomId as string | undefined;
+
+    const presenceId = client.data.presenceId as string | undefined;
+
+    if (!roomId || !presenceId) {
+      return {
+        alive: false,
+      };
+    }
+
+    const alive = await this.presenceService.heartbeat(
+      roomId,
+      presenceId,
+      client.id,
+    );
+
+    /*
+     * While an active participant is
+     * heartbeating, also clean abandoned
+     * participants in the same room.
+     */
+    const removed = await this.presenceService.removeStaleUsers(roomId);
+
+    if (removed) {
+      await this.broadcastPresence(roomId);
+    }
+
+    return {
+      alive,
+      roomId,
     };
   }
 
-  @SubscribeMessage(
-    'presence:leave',
-  )
+  @SubscribeMessage('presence:leave')
   async handleLeavePresence(
     @ConnectedSocket()
     client: Socket,
   ) {
-    const roomId =
-      client.data.roomId as
-        | string
-        | undefined;
+    const roomId = client.data.roomId as string | undefined;
 
     if (!roomId) {
       return {
-        left:
-          false,
+        left: false,
       };
     }
 
-    await this.removeFromPresence(
-      client,
-    );
+    await this.removeFromPresence(client);
 
     return {
-      left:
-        true,
+      left: true,
 
       roomId,
     };
   }
 
-  @SubscribeMessage(
-    'chat:history',
-  )
+  @SubscribeMessage('chat:history')
   async handleChatHistory(
     @ConnectedSocket()
     client: Socket,
   ) {
-    const roomId =
-      client.data.watchingRoomId as
-        | string
-        | undefined;
+    const roomId = client.data.watchingRoomId as string | undefined;
 
     if (!roomId) {
-      throw new BadRequestException(
-        'You are not watching a room',
-      );
+      throw new BadRequestException('You are not watching a room');
     }
 
-    const messages =
-      await this.chatService.getHistory(
-        roomId,
-      );
+    const messages = await this.chatService.getHistory(roomId);
 
     return {
       roomId,
@@ -431,518 +320,302 @@ export class RealtimeGateway
     };
   }
 
-  @SubscribeMessage(
-    'chat:send',
-  )
+  @SubscribeMessage('chat:send')
   async handleChatSend(
     @ConnectedSocket()
     client: Socket,
 
     @MessageBody()
-    payload:
-      ChatSendPayload,
+    payload: ChatSendPayload,
   ) {
-    const roomId =
-      client.data.roomId as
-        | string
-        | undefined;
+    const roomId = client.data.roomId as string | undefined;
 
-    const presenceId =
-      client.data.presenceId as
-        | string
-        | undefined;
+    const presenceId = client.data.presenceId as string | undefined;
 
-    const user =
-      client.data.user as
-        | AuthUser
-        | undefined;
+    const user = client.data.user as AuthUser | undefined;
 
-    if (
-      !roomId ||
-      !presenceId ||
-      !user
-    ) {
+    if (!roomId || !presenceId || !user) {
       return {
-        sent:
-          false,
+        sent: false,
 
-        error:
-          'Join the room before sending messages',
+        error: 'Join the room before sending messages',
       };
     }
 
-    const present =
-      await this.presenceService.isPresent(
-        roomId,
-        presenceId,
-      );
+    const present = await this.presenceService.isPresent(roomId, presenceId);
 
     if (!present) {
       return {
-        sent:
-          false,
+        sent: false,
 
-        error:
-          'You are not currently present in this room',
+        error: 'You are not currently present in this room',
       };
     }
 
-    const content =
-      payload?.content?.trim();
+    const content = payload?.content?.trim();
 
     if (!content) {
       return {
-        sent:
-          false,
+        sent: false,
 
-        error:
-          'Message cannot be empty',
+        error: 'Message cannot be empty',
       };
     }
 
-    if (
-      content.length >
-      500
-    ) {
+    if (content.length > 500) {
       return {
-        sent:
-          false,
+        sent: false,
 
-        error:
-          'Message cannot exceed 500 characters',
+        error: 'Message cannot exceed 500 characters',
       };
     }
 
     try {
-      const message =
-        await this.chatService.addMessage({
-          roomId,
-          presenceId,
+      const message = await this.chatService.addMessage({
+        roomId,
 
-          userId:
-            user.id,
+        presenceId,
 
-          displayName:
-            user.displayName,
+        userId: user.id,
 
-          identityType:
-            user.type,
+        displayName: user.displayName,
 
-          email:
-            user.email,
+        identityType: user.type,
 
-          content,
-        });
+        email: user.email,
 
-      this.server
-        .to(
-          this.getRoomChannel(
-            roomId,
-          ),
-        )
-        .emit(
-          'chat:message',
-          message,
-        );
+        avatarId: user.avatarId,
+
+        content,
+      });
+
+      this.server.to(this.getRoomChannel(roomId)).emit('chat:message', message);
 
       return {
-        sent:
-          true,
+        sent: true,
 
         message,
       };
-    } catch (
-      error
-    ) {
-      console.error(
-        'Failed to send chat message:',
-        error,
-      );
+    } catch (error) {
+      console.error('Failed to send chat message:', error);
 
       return {
-        sent:
-          false,
+        sent: false,
 
-        error:
-          'Failed to send message',
+        error: 'Failed to send message',
       };
     }
   }
 
-  @SubscribeMessage(
-    'music:get',
-  )
+  @SubscribeMessage('music:get')
   async handleMusicGet(
     @ConnectedSocket()
     client: Socket,
   ) {
-    const roomId =
-      client.data.watchingRoomId as
-        | string
-        | undefined;
+    const roomId = client.data.watchingRoomId as string | undefined;
 
     if (!roomId) {
       return {
-        ok:
-          false,
+        ok: false,
 
-        error:
-          'You are not watching a room',
+        error: 'You are not watching a room',
       };
     }
 
-    const state =
-      await this.musicService.getState(
-        roomId,
-      );
+    const state = await this.musicService.getState(roomId);
 
     return {
-      ok:
-        true,
+      ok: true,
 
       state,
     };
   }
 
-  @SubscribeMessage(
-    'music:set',
-  )
+  @SubscribeMessage('music:set')
   async handleMusicSet(
     @ConnectedSocket()
     client: Socket,
 
     @MessageBody()
-    payload:
-      MusicSetPayload,
+    payload: MusicSetPayload,
   ) {
-    const roomId =
-      client.data.roomId as
-        | string
-        | undefined;
+    const roomId = client.data.roomId as string | undefined;
 
-    const presenceId =
-      client.data.presenceId as
-        | string
-        | undefined;
+    const presenceId = client.data.presenceId as string | undefined;
 
-    const user =
-      client.data.user as
-        | AuthUser
-        | undefined;
+    const user = client.data.user as AuthUser | undefined;
 
-    if (
-      !roomId ||
-      !presenceId ||
-      !user
-    ) {
+    if (!roomId || !presenceId || !user) {
       return {
-        ok:
-          false,
+        ok: false,
 
-        error:
-          'Join the room before controlling music',
+        error: 'Join the room before controlling music',
       };
     }
 
-    const present =
-      await this.presenceService.isPresent(
-        roomId,
-        presenceId,
-      );
+    const present = await this.presenceService.isPresent(roomId, presenceId);
 
     if (!present) {
       return {
-        ok:
-          false,
+        ok: false,
 
-        error:
-          'Join the room before controlling music',
+        error: 'Join the room before controlling music',
       };
     }
 
     try {
-      const state =
-        await this.musicService.setTrack({
-          roomId,
-          user,
+      const state = await this.musicService.setTrack({
+        roomId,
+        user,
 
-          url:
-            payload?.url ??
-            '',
+        url: payload?.url ?? '',
 
-          title:
-            payload?.title,
+        title: payload?.title,
 
-          provider:
-            payload?.provider,
-        });
+        provider: payload?.provider,
+      });
 
-      this.server
-        .to(
-          this.getRoomChannel(
-            roomId,
-          ),
-        )
-        .emit(
-          'music:update',
-          state,
-        );
+      this.server.to(this.getRoomChannel(roomId)).emit('music:update', state);
 
       return {
-        ok:
-          true,
+        ok: true,
 
         state,
       };
-    } catch (
-      error
-    ) {
+    } catch (error) {
       return {
-        ok:
-          false,
+        ok: false,
 
         error:
-          error instanceof
-            Error
-            ? error.message
-            : 'Unable to update music',
+          error instanceof Error ? error.message : 'Unable to update music',
       };
     }
   }
 
-  @SubscribeMessage(
-    'music:clear',
-  )
+  @SubscribeMessage('music:clear')
   async handleMusicClear(
     @ConnectedSocket()
     client: Socket,
   ) {
-    const roomId =
-      client.data.roomId as
-        | string
-        | undefined;
+    const roomId = client.data.roomId as string | undefined;
 
-    const presenceId =
-      client.data.presenceId as
-        | string
-        | undefined;
+    const presenceId = client.data.presenceId as string | undefined;
 
-    const user =
-      client.data.user as
-        | AuthUser
-        | undefined;
+    const user = client.data.user as AuthUser | undefined;
 
-    if (
-      !roomId ||
-      !presenceId ||
-      !user
-    ) {
+    if (!roomId || !presenceId || !user) {
       return {
-        ok:
-          false,
+        ok: false,
 
-        error:
-          'Join the room before controlling music',
+        error: 'Join the room before controlling music',
       };
     }
 
-    const present =
-      await this.presenceService.isPresent(
-        roomId,
-        presenceId,
-      );
+    const present = await this.presenceService.isPresent(roomId, presenceId);
 
     if (!present) {
       return {
-        ok:
-          false,
+        ok: false,
 
-        error:
-          'Join the room before controlling music',
+        error: 'Join the room before controlling music',
       };
     }
 
     try {
-      const state =
-        await this.musicService.clearTrack(
-          roomId,
-          user,
-        );
+      const state = await this.musicService.clearTrack(roomId, user);
 
-      this.server
-        .to(
-          this.getRoomChannel(
-            roomId,
-          ),
-        )
-        .emit(
-          'music:update',
-          state,
-        );
+      this.server.to(this.getRoomChannel(roomId)).emit('music:update', state);
 
       return {
-        ok:
-          true,
+        ok: true,
 
         state,
       };
-    } catch (
-      error
-    ) {
+    } catch (error) {
       return {
-        ok:
-          false,
+        ok: false,
 
-        error:
-          error instanceof
-            Error
-            ? error.message
-            : 'Unable to clear music',
+        error: error instanceof Error ? error.message : 'Unable to clear music',
       };
     }
   }
 
-  @SubscribeMessage(
-    'music:permission',
-  )
+  @SubscribeMessage('music:permission')
   async handleMusicPermission(
     @ConnectedSocket()
     client: Socket,
 
     @MessageBody()
-    payload:
-      MusicPermissionPayload,
+    payload: MusicPermissionPayload,
   ) {
-    const roomId =
-      client.data.watchingRoomId as
-        | string
-        | undefined;
+    const roomId = client.data.watchingRoomId as string | undefined;
 
-    const user =
-      client.data.user as
-        | AuthUser
-        | undefined;
+    const user = client.data.user as AuthUser | undefined;
 
-    if (
-      !roomId ||
-      !user
-    ) {
+    if (!roomId || !user) {
       return {
-        ok:
-          false,
+        ok: false,
 
-        error:
-          'Authentication required',
+        error: 'Authentication required',
       };
     }
 
     try {
-      const state =
-        await this.musicService.setPermission(
-          roomId,
-          user,
-          payload.permission,
-        );
+      const state = await this.musicService.setPermission(
+        roomId,
+        user,
+        payload.permission,
+      );
 
-      this.server
-        .to(
-          this.getRoomChannel(
-            roomId,
-          ),
-        )
-        .emit(
-          'music:update',
-          state,
-        );
+      this.server.to(this.getRoomChannel(roomId)).emit('music:update', state);
 
       return {
-        ok:
-          true,
+        ok: true,
 
         state,
       };
-    } catch (
-      error
-    ) {
+    } catch (error) {
       return {
-        ok:
-          false,
+        ok: false,
 
         error:
-          error instanceof
-            Error
+          error instanceof Error
             ? error.message
             : 'Unable to update music permission',
       };
     }
   }
 
-  private async removeFromPresence(
-    client: Socket,
-  ) {
-    const roomId =
-      client.data.roomId as
-        | string
-        | undefined;
+  private async removeFromPresence(client: Socket) {
+    const roomId = client.data.roomId as string | undefined;
 
-    const presenceId =
-      client.data.presenceId as
-        | string
-        | undefined;
+    const presenceId = client.data.presenceId as string | undefined;
 
-    if (
-      !roomId ||
-      !presenceId
-    ) {
+    if (!roomId || !presenceId) {
       return;
     }
 
-    await this.presenceService.removeUser(
-      roomId,
-      presenceId,
-      client.id,
-    );
+    await this.presenceService.removeUser(roomId, presenceId, client.id);
 
-    client.data.roomId =
-      undefined;
+    client.data.roomId = undefined;
 
-    client.data.presenceId =
-      undefined;
+    client.data.presenceId = undefined;
 
-    await this.broadcastPresence(
-      roomId,
-    );
+    await this.broadcastPresence(roomId);
   }
 
-  private async broadcastPresence(
-    roomId: string,
-  ) {
-    const users =
-      await this.presenceService.getUsers(
-        roomId,
-      );
+  private async broadcastPresence(roomId: string) {
+    const users = await this.presenceService.getUsers(roomId);
 
-    this.server
-      .to(
-        this.getRoomChannel(
-          roomId,
-        ),
-      )
-      .emit(
-        'presence:update',
-        {
-          roomId,
-          users,
+    this.server.to(this.getRoomChannel(roomId)).emit('presence:update', {
+      roomId,
+      users,
 
-          count:
-            users.length,
-        },
-      );
+      count: users.length,
+    });
   }
 
-  private getRoomChannel(
-    roomId: string,
-  ) {
+  private getRoomChannel(roomId: string) {
     return `room:${roomId}`;
   }
 }
