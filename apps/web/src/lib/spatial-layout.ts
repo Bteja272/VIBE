@@ -12,15 +12,13 @@ export interface SpatialParticipant {
 
 export interface SeatPosition {
   id: string;
-
-  /*
-   * Normalized percentage coordinates.
-   *
-   * 0 = left/top
-   * 100 = right/bottom
-   */
   x: number;
   y: number;
+}
+
+export interface SeatAssignment {
+  userId: string;
+  seatId: string;
 }
 
 export interface SpatialSeat<
@@ -28,506 +26,274 @@ export interface SpatialSeat<
 > {
   participant: T;
   position: SeatPosition;
-  index: number;
+  seatId: string;
 }
 
 /*
- * The visual canvas currently supports
- * a maximum of 12 active participants,
- * matching backend room capacity.
+ * Fixed 12-seat room.
+ *
+ * Positions never change when occupancy
+ * changes. This is what gives participants
+ * spatial stability.
  */
-const LAYOUTS: Record<
-  number,
-  SeatPosition[]
-> = {
-  1: [
-    {
-      id: "center",
-      x: 50,
-      y: 52,
-    },
-  ],
+export const SPATIAL_SEATS:
+  SeatPosition[] = [
+  {
+    id: "seat-1",
+    x: 40,
+    y: 42,
+  },
+  {
+    id: "seat-2",
+    x: 60,
+    y: 42,
+  },
 
-  2: [
-    {
-      id: "left",
-      x: 35,
-      y: 52,
-    },
-    {
-      id: "right",
-      x: 65,
-      y: 52,
-    },
-  ],
+  {
+    id: "seat-3",
+    x: 40,
+    y: 68,
+  },
+  {
+    id: "seat-4",
+    x: 60,
+    y: 68,
+  },
 
-  3: [
-    {
-      id: "top-left",
-      x: 35,
-      y: 38,
-    },
-    {
-      id: "top-right",
-      x: 65,
-      y: 38,
-    },
-    {
-      id: "bottom-center",
-      x: 50,
-      y: 68,
-    },
-  ],
+  {
+    id: "seat-5",
+    x: 22,
+    y: 42,
+  },
+  {
+    id: "seat-6",
+    x: 78,
+    y: 42,
+  },
 
-  4: [
-    {
-      id: "top-left",
-      x: 35,
-      y: 36,
-    },
-    {
-      id: "top-right",
-      x: 65,
-      y: 36,
-    },
-    {
-      id: "bottom-left",
-      x: 35,
-      y: 68,
-    },
-    {
-      id: "bottom-right",
-      x: 65,
-      y: 68,
-    },
-  ],
+  {
+    id: "seat-7",
+    x: 22,
+    y: 68,
+  },
+  {
+    id: "seat-8",
+    x: 78,
+    y: 68,
+  },
 
-  5: [
-    {
-      id: "top-left",
-      x: 28,
-      y: 36,
-    },
-    {
-      id: "top-center",
-      x: 50,
-      y: 36,
-    },
-    {
-      id: "top-right",
-      x: 72,
-      y: 36,
-    },
-    {
-      id: "bottom-left",
-      x: 39,
-      y: 68,
-    },
-    {
-      id: "bottom-right",
-      x: 61,
-      y: 68,
-    },
-  ],
+  {
+    id: "seat-9",
+    x: 22,
+    y: 24,
+  },
+  {
+    id: "seat-10",
+    x: 40,
+    y: 24,
+  },
+  {
+    id: "seat-11",
+    x: 60,
+    y: 24,
+  },
+  {
+    id: "seat-12",
+    x: 78,
+    y: 24,
+  },
+];
 
-  6: [
-    {
-      id: "top-left",
-      x: 27,
-      y: 36,
-    },
-    {
-      id: "top-center",
-      x: 50,
-      y: 36,
-    },
-    {
-      id: "top-right",
-      x: 73,
-      y: 36,
-    },
-    {
-      id: "bottom-left",
-      x: 27,
-      y: 68,
-    },
-    {
-      id: "bottom-center",
-      x: 50,
-      y: 68,
-    },
-    {
-      id: "bottom-right",
-      x: 73,
-      y: 68,
-    },
-  ],
+/*
+ * Determines which seats newcomers receive.
+ *
+ * Central seats fill first so small groups
+ * still look intentional.
+ */
+export const SEAT_PRIORITY = [
+  "seat-1",
+  "seat-2",
+  "seat-3",
+  "seat-4",
 
-  7: [
-    {
-      id: "row-1-1",
-      x: 20,
-      y: 36,
-    },
-    {
-      id: "row-1-2",
-      x: 40,
-      y: 36,
-    },
-    {
-      id: "row-1-3",
-      x: 60,
-      y: 36,
-    },
-    {
-      id: "row-1-4",
-      x: 80,
-      y: 36,
-    },
-    {
-      id: "row-2-1",
-      x: 30,
-      y: 68,
-    },
-    {
-      id: "row-2-2",
-      x: 50,
-      y: 68,
-    },
-    {
-      id: "row-2-3",
-      x: 70,
-      y: 68,
-    },
-  ],
+  "seat-5",
+  "seat-6",
+  "seat-7",
+  "seat-8",
 
-  8: [
-    {
-      id: "row-1-1",
-      x: 20,
-      y: 36,
-    },
-    {
-      id: "row-1-2",
-      x: 40,
-      y: 36,
-    },
-    {
-      id: "row-1-3",
-      x: 60,
-      y: 36,
-    },
-    {
-      id: "row-1-4",
-      x: 80,
-      y: 36,
-    },
-    {
-      id: "row-2-1",
-      x: 20,
-      y: 68,
-    },
-    {
-      id: "row-2-2",
-      x: 40,
-      y: 68,
-    },
-    {
-      id: "row-2-3",
-      x: 60,
-      y: 68,
-    },
-    {
-      id: "row-2-4",
-      x: 80,
-      y: 68,
-    },
-  ],
+  "seat-9",
+  "seat-10",
+  "seat-11",
+  "seat-12",
+];
 
-  9: [
-    {
-      id: "row-1-1",
-      x: 28,
-      y: 28,
-    },
-    {
-      id: "row-1-2",
-      x: 50,
-      y: 28,
-    },
-    {
-      id: "row-1-3",
-      x: 72,
-      y: 28,
-    },
-    {
-      id: "row-2-1",
-      x: 28,
-      y: 52,
-    },
-    {
-      id: "row-2-2",
-      x: 50,
-      y: 52,
-    },
-    {
-      id: "row-2-3",
-      x: 72,
-      y: 52,
-    },
-    {
-      id: "row-3-1",
-      x: 28,
-      y: 76,
-    },
-    {
-      id: "row-3-2",
-      x: 50,
-      y: 76,
-    },
-    {
-      id: "row-3-3",
-      x: 72,
-      y: 76,
-    },
-  ],
-
-  10: [
-    {
-      id: "row-1-1",
-      x: 20,
-      y: 27,
-    },
-    {
-      id: "row-1-2",
-      x: 40,
-      y: 27,
-    },
-    {
-      id: "row-1-3",
-      x: 60,
-      y: 27,
-    },
-    {
-      id: "row-1-4",
-      x: 80,
-      y: 27,
-    },
-    {
-      id: "row-2-1",
-      x: 20,
-      y: 52,
-    },
-    {
-      id: "row-2-2",
-      x: 40,
-      y: 52,
-    },
-    {
-      id: "row-2-3",
-      x: 60,
-      y: 52,
-    },
-    {
-      id: "row-2-4",
-      x: 80,
-      y: 52,
-    },
-    {
-      id: "row-3-1",
-      x: 40,
-      y: 77,
-    },
-    {
-      id: "row-3-2",
-      x: 60,
-      y: 77,
-    },
-  ],
-
-  11: [
-    {
-      id: "row-1-1",
-      x: 20,
-      y: 27,
-    },
-    {
-      id: "row-1-2",
-      x: 40,
-      y: 27,
-    },
-    {
-      id: "row-1-3",
-      x: 60,
-      y: 27,
-    },
-    {
-      id: "row-1-4",
-      x: 80,
-      y: 27,
-    },
-    {
-      id: "row-2-1",
-      x: 20,
-      y: 52,
-    },
-    {
-      id: "row-2-2",
-      x: 40,
-      y: 52,
-    },
-    {
-      id: "row-2-3",
-      x: 60,
-      y: 52,
-    },
-    {
-      id: "row-2-4",
-      x: 80,
-      y: 52,
-    },
-    {
-      id: "row-3-1",
-      x: 30,
-      y: 77,
-    },
-    {
-      id: "row-3-2",
-      x: 50,
-      y: 77,
-    },
-    {
-      id: "row-3-3",
-      x: 70,
-      y: 77,
-    },
-  ],
-
-  12: [
-    {
-      id: "row-1-1",
-      x: 20,
-      y: 27,
-    },
-    {
-      id: "row-1-2",
-      x: 40,
-      y: 27,
-    },
-    {
-      id: "row-1-3",
-      x: 60,
-      y: 27,
-    },
-    {
-      id: "row-1-4",
-      x: 80,
-      y: 27,
-    },
-    {
-      id: "row-2-1",
-      x: 20,
-      y: 52,
-    },
-    {
-      id: "row-2-2",
-      x: 40,
-      y: 52,
-    },
-    {
-      id: "row-2-3",
-      x: 60,
-      y: 52,
-    },
-    {
-      id: "row-2-4",
-      x: 80,
-      y: 52,
-    },
-    {
-      id: "row-3-1",
-      x: 20,
-      y: 77,
-    },
-    {
-      id: "row-3-2",
-      x: 40,
-      y: 77,
-    },
-    {
-      id: "row-3-3",
-      x: 60,
-      y: 77,
-    },
-    {
-      id: "row-3-4",
-      x: 80,
-      y: 77,
-    },
-  ],
-};
-
-export function getSpatialLayout(
-  participantCount: number,
-): SeatPosition[] {
-  if (
-    participantCount <=
-    0
-  ) {
-    return [];
-  }
-
-  const safeCount =
-    Math.min(
-      participantCount,
-      12,
-    );
-
-  return (
-    LAYOUTS[
-      safeCount
-    ] ?? []
+export function getSeatPosition(
+  seatId: string,
+): SeatPosition | undefined {
+  return SPATIAL_SEATS.find(
+    (seat) =>
+      seat.id === seatId,
   );
 }
 
-export function assignParticipantsToSeats<
+export function reconcileSeatAssignments(
+  participants:
+    SpatialParticipant[],
+  previous:
+    Record<string, string>,
+): Record<string, string> {
+  const activeUserIds =
+    new Set(
+      participants.map(
+        (participant) =>
+          participant.userId,
+      ),
+    );
+
+  const next:
+    Record<string, string> =
+      {};
+
+  const occupiedSeats =
+    new Set<string>();
+
+  /*
+   * Preserve valid existing assignments
+   * for participants who are still here.
+   */
+  for (
+    const [
+      userId,
+      seatId,
+    ] of Object.entries(
+      previous,
+    )
+  ) {
+    if (
+      !activeUserIds.has(
+        userId,
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      !getSeatPosition(
+        seatId,
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      occupiedSeats.has(
+        seatId,
+      )
+    ) {
+      continue;
+    }
+
+    next[userId] =
+      seatId;
+
+    occupiedSeats.add(
+      seatId,
+    );
+  }
+
+  /*
+   * Deterministic ordering prevents
+   * Redis response order from affecting
+   * seat assignment.
+   */
+  const unassigned =
+    participants
+      .filter(
+        (participant) =>
+          !next[
+            participant.userId
+          ],
+      )
+      .sort(
+        (
+          left,
+          right,
+        ) =>
+          left.userId.localeCompare(
+            right.userId,
+          ),
+      );
+
+  for (
+    const participant of
+      unassigned
+  ) {
+    const availableSeat =
+      SEAT_PRIORITY.find(
+        (seatId) =>
+          !occupiedSeats.has(
+            seatId,
+          ),
+      );
+
+    if (
+      !availableSeat
+    ) {
+      break;
+    }
+
+    next[
+      participant.userId
+    ] =
+      availableSeat;
+
+    occupiedSeats.add(
+      availableSeat,
+    );
+  }
+
+  return next;
+}
+
+export function buildSpatialSeats<
   T extends SpatialParticipant,
 >(
   participants: T[],
+  assignments:
+    Record<string, string>,
 ): SpatialSeat<T>[] {
-  /*
-   * Stable deterministic ordering.
-   *
-   * Socket/Redis ordering should not
-   * decide where somebody sits.
-   */
-  const ordered =
-    [...participants].sort(
+  return participants
+    .map(
+      (participant) => {
+        const seatId =
+          assignments[
+            participant.userId
+          ];
+
+        if (!seatId) {
+          return null;
+        }
+
+        const position =
+          getSeatPosition(
+            seatId,
+          );
+
+        if (!position) {
+          return null;
+        }
+
+        return {
+          participant,
+          seatId,
+          position,
+        };
+      },
+    )
+    .filter(
       (
-        left,
-        right,
-      ) =>
-        left.userId.localeCompare(
-          right.userId,
-        ),
+        seat,
+      ): seat is SpatialSeat<T> =>
+        seat !== null,
     );
-
-  const positions =
-    getSpatialLayout(
-      ordered.length,
-    );
-
-  return ordered.map(
-    (
-      participant,
-      index,
-    ) => ({
-      participant,
-
-      position:
-        positions[index],
-
-      index,
-    }),
-  );
 }
