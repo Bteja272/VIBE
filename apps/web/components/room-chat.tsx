@@ -12,36 +12,24 @@ import {
 import VibeAvatar from "@/components/vibe-avatar";
 
 import { socket } from "@/src/lib/socket";
-
 import type { ChatHistoryResponse, ChatMessage } from "@/src/types/chat";
 
 interface ChatParticipant {
   userId: string;
   displayName: string;
-
   identityType: "GUEST" | "REGISTERED";
-
   avatarId?: string;
 }
 
 interface RoomChatProps {
   roomId: string;
   canSend: boolean;
-
   participants?: ChatParticipant[];
-
   currentUserId?: string | null;
-
   compact?: boolean;
 
-  onIncomingMessage?: (message: ChatMessage) => void;
-
-  onHistoryLoaded?: (messages: ChatMessage[]) => void;
-
   prefillText?: string | null;
-
   prefillRequestId?: number;
-
   onPrefillConsumed?: () => void;
 }
 
@@ -50,18 +38,17 @@ interface MentionQuery {
   query: string;
 }
 
+const MAX_MESSAGES = 50;
+const MAX_MENTION_SUGGESTIONS = 6;
+const MESSAGE_MAX_LENGTH = 500;
+const SOCKET_TIMEOUT_MS = 5000;
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function getMentionQuery(value: string, cursor: number): MentionQuery | null {
   const beforeCursor = value.slice(0, cursor);
-
-  /*
-   * Looks for the most recent @ token
-   * that has not yet been terminated
-   * by whitespace.
-   */
   const match = beforeCursor.match(/(?:^|\s)@([^\s@]*)$/);
 
   if (!match) {
@@ -69,12 +56,10 @@ function getMentionQuery(value: string, cursor: number): MentionQuery | null {
   }
 
   const fullMatch = match[0];
-
   const atOffset = fullMatch.lastIndexOf("@");
 
   return {
     start: beforeCursor.length - fullMatch.length + atOffset,
-
     query: match[1] ?? "",
   };
 }
@@ -84,48 +69,37 @@ function renderMessageContent(
   participants: ChatParticipant[],
   currentUserId: string | null,
 ) {
-  if (participants.length === 0) {
+  const orderedParticipants = participants
+    .filter((participant) => participant.displayName.trim())
+    .map((participant) => ({
+      userId: participant.userId,
+      displayName: participant.displayName,
+    }))
+    .sort((left, right) => right.displayName.length - left.displayName.length);
+
+  if (orderedParticipants.length === 0) {
     return content;
   }
 
   /*
-   * Longest names first prevents:
-   *
-   * @Sam
-   * @Sam Aaron
-   *
-   * from matching @Sam prematurely.
+   * Longest names are matched first so "@Sam Aaron"
+   * does not get partially matched as "@Sam".
    */
-  const orderedNames = [...participants]
-    .map((participant) => ({
-      userId: participant.userId,
-
-      displayName: participant.displayName,
-    }))
-    .filter((participant) => participant.displayName.trim())
-    .sort((left, right) => right.displayName.length - left.displayName.length);
-
-  if (orderedNames.length === 0) {
-    return content;
-  }
-
   const expression = new RegExp(
-    `(@(?:${orderedNames
+    `(@(?:${orderedParticipants
       .map((participant) => escapeRegExp(participant.displayName))
       .join("|")}))`,
     "g",
   );
 
-  const pieces = content.split(expression);
-
-  return pieces.map((piece, index) => {
+  return content.split(expression).map((piece, index) => {
     if (!piece.startsWith("@")) {
       return <span key={index}>{piece}</span>;
     }
 
     const mentionedName = piece.slice(1);
 
-    const participant = orderedNames.find(
+    const participant = orderedParticipants.find(
       (item) => item.displayName === mentionedName,
     );
 
@@ -133,13 +107,13 @@ function renderMessageContent(
       return <span key={index}>{piece}</span>;
     }
 
-    const isCurrentUser = participant.userId === currentUserId;
+    const mentionsCurrentUser = participant.userId === currentUserId;
 
     return (
       <span
         key={index}
         className={
-          isCurrentUser
+          mentionsCurrentUser
             ? "rounded bg-neutral-100 px-1 font-medium text-neutral-950"
             : "rounded bg-neutral-800 px-1 font-medium text-neutral-200"
         }
@@ -156,18 +130,13 @@ export default function RoomChat({
   participants = [],
   currentUserId = null,
   compact = false,
-  onIncomingMessage,
-  onHistoryLoaded,
   prefillText = null,
   prefillRequestId = 0,
   onPrefillConsumed,
 }: RoomChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-
   const [message, setMessage] = useState("");
-
   const [error, setError] = useState<string | null>(null);
-
   const [sending, setSending] = useState(false);
 
   const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null);
@@ -175,50 +144,7 @@ export default function RoomChat({
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
-
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  /*
- * Allows another spatial-room control
- * to open chat with text already placed
- * in the composer.
- *
- * Example:
- *   @Chaos 
- */
-useEffect(() => {
-  if (!prefillText || !canSend) {
-    return;
-  }
-
-  setMessage(prefillText);
-
-  setMentionQuery(null);
-
-  const frame = window.requestAnimationFrame(() => {
-    const input = inputRef.current;
-
-    if (!input) {
-      return;
-    }
-
-    input.focus();
-
-    const cursor = prefillText.length;
-
-    input.setSelectionRange(cursor, cursor);
-  });
-
-  onPrefillConsumed?.();
-
-  return () => {
-    window.cancelAnimationFrame(frame);
-  };
-}, [
-  prefillText,
-  prefillRequestId,
-  canSend,
-  onPrefillConsumed,
-]);
 
   const mentionSuggestions = useMemo(() => {
     if (!mentionQuery) {
@@ -232,8 +158,34 @@ useEffect(() => {
       .filter((participant) =>
         participant.displayName.toLocaleLowerCase().includes(query),
       )
-      .slice(0, 6);
+      .slice(0, MAX_MENTION_SUGGESTIONS);
   }, [mentionQuery, participants, currentUserId]);
+
+  useEffect(() => {
+    if (!prefillText || !canSend) {
+      return;
+    }
+
+    setMessage(prefillText);
+    setMentionQuery(null);
+
+    const frame = window.requestAnimationFrame(() => {
+      const input = inputRef.current;
+
+      if (!input) {
+        return;
+      }
+
+      input.focus();
+      input.setSelectionRange(prefillText.length, prefillText.length);
+    });
+
+    onPrefillConsumed?.();
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [prefillText, prefillRequestId, canSend, onPrefillConsumed]);
 
   useEffect(() => {
     setSelectedMentionIndex(0);
@@ -250,10 +202,8 @@ useEffect(() => {
           return current;
         }
 
-        return [...current, incoming].slice(-50);
+        return [...current, incoming].slice(-MAX_MESSAGES);
       });
-
-      onIncomingMessage?.(incoming);
     }
 
     function loadHistory() {
@@ -265,48 +215,40 @@ useEffect(() => {
             return;
           }
 
-          const history = response.messages ?? [];
-
-          setMessages(history);
-
-          onHistoryLoaded?.(history);
+          setMessages(response.messages ?? []);
         },
       );
     }
 
     socket.on("chat:message", handleMessage);
+    socket.on("connect", loadHistory);
 
     if (socket.connected) {
       loadHistory();
     }
 
-    socket.on("connect", loadHistory);
-
     return () => {
       socket.off("chat:message", handleMessage);
-
       socket.off("connect", loadHistory);
     };
-  }, [roomId, onIncomingMessage, onHistoryLoaded]);
+  }, [roomId]);
 
   useEffect(() => {
-  const container =
-    messagesContainerRef.current;
+    const container = messagesContainerRef.current;
 
-  if (!container) {
-    return;
-  }
+    if (!container) {
+      return;
+    }
 
-  container.scrollTo({
-    top: container.scrollHeight,
-    behavior: "smooth",
-  });
-}, [messages]);
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages]);
 
   function updateMentionState(value: string, cursor: number | null) {
     if (cursor === null) {
       setMentionQuery(null);
-
       return;
     }
 
@@ -315,7 +257,6 @@ useEffect(() => {
 
   function handleInputChange(value: string, cursor: number | null) {
     setMessage(value);
-
     updateMentionState(value, cursor);
   }
 
@@ -325,26 +266,20 @@ useEffect(() => {
     }
 
     const input = inputRef.current;
-
     const cursor = input?.selectionStart ?? message.length;
 
     const before = message.slice(0, mentionQuery.start);
-
     const after = message.slice(cursor);
-
     const inserted = `@${participant.displayName} `;
 
-    const next = `${before}${inserted}${after}`;
-
+    const nextMessage = `${before}${inserted}${after}`;
     const nextCursor = before.length + inserted.length;
 
-    setMessage(next);
-
+    setMessage(nextMessage);
     setMentionQuery(null);
 
     window.requestAnimationFrame(() => {
       input?.focus();
-
       input?.setSelectionRange(nextCursor, nextCursor);
     });
   }
@@ -389,7 +324,6 @@ useEffect(() => {
 
     if (event.key === "Escape") {
       event.preventDefault();
-
       setMentionQuery(null);
     }
   }
@@ -404,19 +338,13 @@ useEffect(() => {
     }
 
     setError(null);
-
     setSending(true);
 
-    socket.timeout(5000).emit(
+    socket.timeout(SOCKET_TIMEOUT_MS).emit(
       "chat:send",
-
-      {
-        content,
-      },
-
+      { content },
       (
         timeoutError: Error | null,
-
         response?: {
           sent: boolean;
           error?: string;
@@ -427,18 +355,15 @@ useEffect(() => {
 
         if (timeoutError) {
           setError("The server did not respond. Please try again.");
-
           return;
         }
 
         if (!response?.sent) {
           setError(response?.error ?? "Unable to send message");
-
           return;
         }
 
         setMessage("");
-
         setMentionQuery(null);
       },
     );
@@ -453,15 +378,14 @@ useEffect(() => {
       }
     >
       {!compact && (
-        <div>
+        <header>
           <h2 className="text-lg font-semibold">Room chat</h2>
-
           <p className="mt-1 text-sm text-neutral-500">Recent room messages</p>
-        </div>
+        </header>
       )}
 
       <div
-      ref={messagesContainerRef}
+        ref={messagesContainerRef}
         className={
           compact
             ? "min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4"
@@ -478,7 +402,7 @@ useEffect(() => {
             const isCurrentUser = item.userId === currentUserId;
 
             return (
-              <div
+              <article
                 key={item.id}
                 className={`rounded-xl px-3 py-3 ${
                   isCurrentUser ? "bg-neutral-800" : "bg-neutral-900"
@@ -520,7 +444,7 @@ useEffect(() => {
                     </p>
                   </div>
                 </div>
-              </div>
+              </article>
             );
           })
         )}
@@ -552,13 +476,8 @@ useEffect(() => {
                   key={participant.userId}
                   type="button"
                   onMouseDown={(event) => {
-                    /*
-                     * Prevent the input
-                     * from losing its
-                     * cursor position.
-                     */
+                    // Preserve the input cursor while selecting a mention.
                     event.preventDefault();
-
                     insertMention(participant);
                   }}
                   className={`flex w-full items-center gap-3 px-3 py-2 text-left ${
@@ -590,20 +509,20 @@ useEffect(() => {
               ref={inputRef}
               type="text"
               value={message}
-              onChange={(event) => {
+              onChange={(event) =>
                 handleInputChange(
                   event.target.value,
                   event.target.selectionStart,
-                );
-              }}
-              onClick={(event) => {
+                )
+              }
+              onClick={(event) =>
                 updateMentionState(
                   event.currentTarget.value,
                   event.currentTarget.selectionStart,
-                );
-              }}
+                )
+              }
               onKeyDown={handleInputKeyDown}
-              maxLength={500}
+              maxLength={MESSAGE_MAX_LENGTH}
               placeholder="Say something... Use @ to mention"
               className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-sm outline-none transition focus:border-neutral-500"
             />

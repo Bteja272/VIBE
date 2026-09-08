@@ -8,7 +8,6 @@ type MusicPermission = "OWNER_ONLY" | "ANY_MEMBER";
 
 interface RoomMusicState {
   roomId: string;
-
   permission: MusicPermission;
 
   track: {
@@ -23,13 +22,18 @@ interface RoomMusicState {
 
 interface RoomMusicProps {
   roomId: string;
-
   isOwner: boolean;
-
   canControl: boolean;
-
   compact?: boolean;
 }
+
+interface MusicActionResponse {
+  ok: boolean;
+  state?: RoomMusicState;
+  error?: string;
+}
+
+const SOCKET_TIMEOUT_MS = 5000;
 
 export default function RoomMusic({
   roomId,
@@ -38,107 +42,74 @@ export default function RoomMusic({
   compact = false,
 }: RoomMusicProps) {
   const [state, setState] = useState<RoomMusicState | null>(null);
-
   const [url, setUrl] = useState("");
-
   const [title, setTitle] = useState("");
-
   const [error, setError] = useState<string | null>(null);
-
   const [loading, setLoading] = useState(false);
+
+  const canEditMusic =
+    canControl && (isOwner || state?.permission === "ANY_MEMBER");
 
   useEffect(() => {
     function handleMusicUpdate(incoming: RoomMusicState) {
-      if (incoming.roomId !== roomId) {
-        return;
+      if (incoming.roomId === roomId) {
+        setState(incoming);
       }
-
-      setState(incoming);
     }
 
-    function loadState() {
-      socket.emit(
-        "music:get",
-        undefined,
-        (response: { ok: boolean; state?: RoomMusicState; error?: string }) => {
-          if (response?.ok && response.state) {
-            setState(response.state);
-          }
-        },
-      );
+    function loadMusicState() {
+      socket.emit("music:get", undefined, (response: MusicActionResponse) => {
+        if (response?.ok && response.state) {
+          setState(response.state);
+        }
+      });
     }
 
     socket.on("music:update", handleMusicUpdate);
+    socket.on("connect", loadMusicState);
 
     if (socket.connected) {
-      loadState();
+      loadMusicState();
     }
-
-    socket.on("connect", loadState);
 
     return () => {
       socket.off("music:update", handleMusicUpdate);
-
-      socket.off("connect", loadState);
+      socket.off("connect", loadMusicState);
     };
   }, [roomId]);
-
-  /*
-   * The backend remains authoritative
-   * about whether a participant can
-   * actually change the music state.
-   *
-   * This frontend check is just UX.
-   */
-  const allowedToControl = Boolean(
-    canControl && (isOwner || state?.permission === "ANY_MEMBER"),
-  );
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!url.trim()) {
+    const trackUrl = url.trim();
+
+    if (!trackUrl) {
       return;
     }
 
     setLoading(true);
-
     setError(null);
 
-    socket.timeout(5000).emit(
+    socket.timeout(SOCKET_TIMEOUT_MS).emit(
       "music:set",
-
       {
-        url: url.trim(),
-
+        url: trackUrl,
         title: title.trim() || undefined,
       },
-
-      (
-        timeoutError: Error | null,
-
-        response?: {
-          ok: boolean;
-          state?: RoomMusicState;
-          error?: string;
-        },
-      ) => {
+      (timeoutError: Error | null, response?: MusicActionResponse) => {
         setLoading(false);
 
         if (timeoutError) {
           setError("The server did not respond.");
-
           return;
         }
 
         if (!response?.ok) {
           setError(response?.error ?? "Unable to update music");
-
           return;
         }
 
         setUrl("");
-
         setTitle("");
       },
     );
@@ -146,34 +117,26 @@ export default function RoomMusic({
 
   function clearMusic() {
     setLoading(true);
-
     setError(null);
 
-    socket.timeout(5000).emit(
-      "music:clear",
-      undefined,
+    socket
+      .timeout(SOCKET_TIMEOUT_MS)
+      .emit(
+        "music:clear",
+        undefined,
+        (timeoutError: Error | null, response?: MusicActionResponse) => {
+          setLoading(false);
 
-      (
-        timeoutError: Error | null,
+          if (timeoutError) {
+            setError("The server did not respond.");
+            return;
+          }
 
-        response?: {
-          ok: boolean;
-          error?: string;
+          if (!response?.ok) {
+            setError(response?.error ?? "Unable to clear music");
+          }
         },
-      ) => {
-        setLoading(false);
-
-        if (timeoutError) {
-          setError("The server did not respond.");
-
-          return;
-        }
-
-        if (!response?.ok) {
-          setError(response?.error ?? "Unable to clear music");
-        }
-      },
-    );
+      );
   }
 
   function changePermission(permission: MusicPermission) {
@@ -181,12 +144,8 @@ export default function RoomMusic({
 
     socket.emit(
       "music:permission",
-
-      {
-        permission,
-      },
-
-      (response: { ok: boolean; error?: string }) => {
+      { permission },
+      (response: MusicActionResponse) => {
         if (!response?.ok) {
           setError(response?.error ?? "Unable to change permission");
         }
@@ -203,11 +162,10 @@ export default function RoomMusic({
       }
     >
       {!compact && (
-        <div>
+        <header>
           <h2 className="text-lg font-semibold">Music</h2>
-
           <p className="mt-1 text-sm text-neutral-500">Shared room listening</p>
-        </div>
+        </header>
       )}
 
       <div
@@ -221,8 +179,8 @@ export default function RoomMusic({
           <>
             <div className="flex items-start gap-3">
               <div
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-lg"
                 aria-hidden="true"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-lg"
               >
                 ♪
               </div>
@@ -250,8 +208,8 @@ export default function RoomMusic({
         ) : (
           <div className="py-2 text-center">
             <div
-              className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-lg"
               aria-hidden="true"
+              className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-lg"
             >
               ♪
             </div>
@@ -279,13 +237,12 @@ export default function RoomMusic({
             className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-sm"
           >
             <option value="OWNER_ONLY">Owner only</option>
-
             <option value="ANY_MEMBER">Any participant</option>
           </select>
         </div>
       )}
 
-      {allowedToControl && (
+      {canEditMusic && (
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
           <input
             type="text"
@@ -327,7 +284,7 @@ export default function RoomMusic({
         </form>
       )}
 
-      {!allowedToControl && canControl && (
+      {!canEditMusic && canControl && (
         <p className="mt-4 text-xs text-neutral-500">
           The room owner currently controls music.
         </p>

@@ -1,5 +1,4 @@
 import Link from "next/link";
-
 import { notFound } from "next/navigation";
 
 import { auth } from "@/auth";
@@ -21,7 +20,10 @@ interface RoomPageProps {
 export default async function RoomPage({ params }: RoomPageProps) {
   const { slug } = await params;
 
-  const [room, session] = await Promise.all([getRoomBySlug(slug), auth()]);
+  const [room, session] = await Promise.all([
+    getRoomBySlug(slug),
+    auth(),
+  ]);
 
   if (!room) {
     notFound();
@@ -31,14 +33,16 @@ export default async function RoomPage({ params }: RoomPageProps) {
 
   const currentMembership = currentUserEmail
     ? room.memberships.find(
-        (membership) => membership.user.email === currentUserEmail,
+        (membership) =>
+          membership.user.email === currentUserEmail,
       )
     : undefined;
 
   const isMember = Boolean(currentMembership);
 
   const isOwner = Boolean(
-    currentUserEmail && room.owner.email === currentUserEmail,
+    currentUserEmail &&
+      room.owner.email === currentUserEmail,
   );
 
   const isSignedIn = Boolean(currentUserEmail);
@@ -66,7 +70,9 @@ export default async function RoomPage({ params }: RoomPageProps) {
                 </span>
               </div>
 
-              <h1 className="mt-3 text-4xl font-semibold">{room.name}</h1>
+              <h1 className="mt-3 text-4xl font-semibold">
+                {room.name}
+              </h1>
 
               <p className="mt-3 max-w-2xl text-neutral-400">
                 {room.description ?? "No description provided."}
@@ -82,7 +88,6 @@ export default async function RoomPage({ params }: RoomPageProps) {
           </div>
         </header>
 
-        {/* Main spatial experience */}
         <section className="mt-8">
           <RoomPresence
             roomId={room.id}
@@ -91,7 +96,6 @@ export default async function RoomPage({ params }: RoomPageProps) {
           />
         </section>
 
-        {/* Room metadata */}
         <section className="grid gap-5 py-8 md:grid-cols-3">
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
             <p className="text-sm text-neutral-500">Owner</p>
@@ -107,17 +111,26 @@ export default async function RoomPage({ params }: RoomPageProps) {
                   {room.owner.displayName ?? "VIBE user"}
                 </p>
 
-                <p className="text-xs text-neutral-500">Registered</p>
+                <p className="text-xs text-neutral-500">
+                  Registered
+                </p>
               </div>
             </div>
           </div>
 
-          <RoomOccupancy roomId={room.id} capacity={room.capacity} />
+          <RoomOccupancy
+            roomId={room.id}
+            capacity={room.capacity}
+          />
 
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-6">
-            <p className="text-sm text-neutral-500">Persistent members</p>
+            <p className="text-sm text-neutral-500">
+              Persistent members
+            </p>
 
-            <p className="mt-2 text-2xl font-semibold">{room.memberCount}</p>
+            <p className="mt-2 text-2xl font-semibold">
+              {room.memberCount}
+            </p>
 
             <p className="mt-1 text-xs text-neutral-600">
               Guests are not persisted.
@@ -125,13 +138,11 @@ export default async function RoomPage({ params }: RoomPageProps) {
           </div>
         </section>
 
-        {/* Realtime tools */}
-        <section className="grid gap-6 lg:grid-cols-2">
-        </section>
-
         {isOwner && (
           <section className="mt-8">
-            <h2 className="mb-4 text-xl font-semibold">Owner controls</h2>
+            <h2 className="mb-4 text-xl font-semibold">
+              Owner controls
+            </h2>
 
             <OwnerRoomActions
               roomId={room.id}
@@ -142,13 +153,12 @@ export default async function RoomPage({ params }: RoomPageProps) {
           </section>
         )}
 
-        {/* Persistent membership list */}
         <section className="mt-10 border-t border-neutral-800 pt-8">
           <h2 className="text-2xl font-semibold">Members</h2>
 
           <p className="mt-2 text-sm text-neutral-500">
-            Registered memberships are persistent. Guests appear only while they
-            are actively present.
+            Registered memberships are persistent. Guests appear only
+            while they are actively present.
           </p>
 
           <div className="mt-5 grid gap-3 md:grid-cols-2">

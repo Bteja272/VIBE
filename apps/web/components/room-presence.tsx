@@ -3,14 +3,10 @@
 import { useEffect, useState } from "react";
 
 import SpatialRoom from "@/components/spatial-room";
-import VibeAvatar from "@/components/vibe-avatar";
 
 import { getVibeToken } from "@/src/lib/api";
-
 import { getGuestActiveRoom, getGuestSession } from "@/src/lib/guest-auth";
-
 import { getPresenceId } from "@/src/lib/presence-session";
-
 import {
   ensureSocketConnection,
   socket,
@@ -20,31 +16,28 @@ import {
 
 interface RoomPresenceProps {
   roomId: string;
-
   shouldBePresent: boolean;
-
   isOwner: boolean;
 }
 
 interface PresenceUser {
   socketId: string;
   presenceId: string;
-
   userId: string;
-
   displayName: string;
-
   identityType: "GUEST" | "REGISTERED";
-
   avatarId?: string;
 }
 
 interface PresenceUpdate {
   roomId: string;
-
   users: PresenceUser[];
-
   count: number;
+}
+
+interface PresenceEnterResponse {
+  entered: boolean;
+  error?: string;
 }
 
 export default function RoomPresence({
@@ -53,36 +46,29 @@ export default function RoomPresence({
   isOwner,
 }: RoomPresenceProps) {
   const [connected, setConnected] = useState(false);
-
   const [users, setUsers] = useState<PresenceUser[]>([]);
-
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let shouldEnterRoom = false;
+    let syncedSocketId: string | undefined;
 
     function watchRoom() {
-      socket.emit("room:watch", {
-        roomId,
-      });
+      socket.emit("room:watch", { roomId });
     }
 
     function enterRoom() {
       socket.emit(
         "presence:enter",
-
         {
           roomId,
-
           presenceId: getPresenceId(),
         },
-
-        (response: { entered: boolean; error?: string }) => {
+        (response: PresenceEnterResponse) => {
           if (!response?.entered) {
             setError(response?.error ?? "Unable to enter room");
-
             return;
           }
 
@@ -91,13 +77,33 @@ export default function RoomPresence({
       );
     }
 
+    function syncRoom() {
+      /*
+       * ensureSocketConnection() and the socket "connect" event can
+       * both reach this function. Sync only once per socket instance.
+       */
+      if (socket.id && syncedSocketId === socket.id) {
+        return;
+      }
+
+      syncedSocketId = socket.id;
+
+      setConnected(true);
+      setError(null);
+
+      watchRoom();
+
+      if (shouldEnterRoom) {
+        enterRoom();
+      }
+    }
+
     async function start() {
       try {
         const guest = getGuestSession();
 
-        const guestShouldBePresent = Boolean(
-          guest && getGuestActiveRoom() === roomId,
-        );
+        const activeGuest =
+          guest && getGuestActiveRoom() === roomId ? guest : null;
 
         if (shouldBePresent) {
           const auth = await getVibeToken();
@@ -107,14 +113,17 @@ export default function RoomPresence({
           }
 
           setCurrentUserId(auth.user.id);
+          shouldEnterRoom = true;
 
           await ensureSocketConnection(auth.token);
-        } else if (guestShouldBePresent && guest) {
-          setCurrentUserId(guest.user.id);
+        } else if (activeGuest) {
+          setCurrentUserId(activeGuest.user.id);
+          shouldEnterRoom = true;
 
-          await ensureSocketConnection(guest.token);
+          await ensureSocketConnection(activeGuest.token);
         } else {
           setCurrentUserId(null);
+          shouldEnterRoom = false;
 
           await ensureSocketConnection();
         }
@@ -123,15 +132,7 @@ export default function RoomPresence({
           return;
         }
 
-        setConnected(true);
-
-        setError(null);
-
-        watchRoom();
-
-        if (shouldBePresent || guestShouldBePresent) {
-          enterRoom();
-        }
+        syncRoom();
       } catch (err) {
         if (cancelled) {
           return;
@@ -144,45 +145,29 @@ export default function RoomPresence({
     }
 
     function handleConnect() {
-      setConnected(true);
-
-      watchRoom();
-
-      const guest = getGuestSession();
-
-      const guestShouldBePresent = Boolean(
-        guest && getGuestActiveRoom() === roomId,
-      );
-
-      if (shouldBePresent || guestShouldBePresent) {
-        enterRoom();
-      }
+      syncRoom();
     }
 
     function handleDisconnect() {
-      setConnected(false);
+      syncedSocketId = undefined;
 
+      setConnected(false);
       setUsers([]);
     }
 
-    function handleConnectError(error: Error) {
-      setError(error.message);
+    function handleConnectError(socketError: Error) {
+      setError(socketError.message);
     }
 
     function handlePresenceUpdate(update: PresenceUpdate) {
-      if (update.roomId !== roomId) {
-        return;
+      if (update.roomId === roomId) {
+        setUsers(update.users);
       }
-
-      setUsers(update.users);
     }
 
     socket.on("connect", handleConnect);
-
     socket.on("disconnect", handleDisconnect);
-
     socket.on("connect_error", handleConnectError);
-
     socket.on("presence:update", handlePresenceUpdate);
 
     void start();
@@ -195,11 +180,8 @@ export default function RoomPresence({
       socket.emit("presence:leave");
 
       socket.off("connect", handleConnect);
-
       socket.off("disconnect", handleDisconnect);
-
       socket.off("connect_error", handleConnectError);
-
       socket.off("presence:update", handlePresenceUpdate);
 
       socket.disconnect();
@@ -207,7 +189,7 @@ export default function RoomPresence({
   }, [roomId, shouldBePresent]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <SpatialRoom
         roomId={roomId}
         users={users}
@@ -222,50 +204,6 @@ export default function RoomPresence({
           {error}
         </p>
       )}
-
-      <details className="rounded-2xl border border-neutral-800 bg-neutral-900">
-        <summary className="cursor-pointer px-5 py-4 text-sm font-medium text-neutral-300">
-          Participants ({users.length})
-        </summary>
-
-        <div className="border-t border-neutral-800 p-5">
-          {users.length === 0 ? (
-            <p className="text-sm text-neutral-500">
-              Nobody is currently in this room.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {users.map((user) => (
-                <div
-                  key={user.userId}
-                  className="flex items-center gap-3 rounded-xl bg-neutral-950 px-4 py-3"
-                >
-                  <VibeAvatar avatarId={user.avatarId} size="sm" />
-
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">
-                      {user.displayName}
-                    </p>
-
-                    <p className="text-xs text-neutral-600">
-                      {user.userId === currentUserId
-                        ? "You"
-                        : user.identityType === "GUEST"
-                          ? "Guest"
-                          : "Registered"}
-                    </p>
-                  </div>
-
-                  <div
-                    className="h-2.5 w-2.5 rounded-full bg-green-400"
-                    title="Online"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </details>
     </div>
   );
 }
