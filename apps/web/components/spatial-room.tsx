@@ -827,8 +827,8 @@ export default function SpatialRoom({
               className="absolute inset-0 z-30 bg-black/20"
             />
 
-            <aside className="absolute bottom-3 left-3 right-3 top-16 z-40 flex flex-col overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl sm:bottom-auto sm:right-auto sm:w-[22rem]">
-              <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+            <aside className="absolute bottom-3 left-3 right-3 top-16 z-40 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl sm:bottom-auto sm:right-auto sm:max-h-[min(34rem,calc(100%-5rem))] sm:w-[22rem]">
+              <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-3">
                 <div className="flex items-center gap-2">
                   <span aria-hidden="true" className="text-lg">
                     🔊
@@ -852,7 +852,7 @@ export default function SpatialRoom({
                 </button>
               </div>
 
-              <div className="p-4">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
                 <RoomMusic
                   roomId={roomId}
                   isOwner={isOwner}
