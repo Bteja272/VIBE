@@ -1,3 +1,4 @@
+
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
@@ -14,6 +15,7 @@ interface RoomMusicState {
     url: string;
     title?: string;
     provider?: string;
+    videoId?: string;
     sharedBy: string;
   } | null;
 
@@ -34,6 +36,7 @@ interface MusicActionResponse {
 }
 
 const SOCKET_TIMEOUT_MS = 5000;
+const YOUTUBE_VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 
 export default function RoomMusic({
   roomId,
@@ -49,6 +52,15 @@ export default function RoomMusic({
 
   const canEditMusic =
     canControl && (isOwner || state?.permission === "ANY_MEMBER");
+
+  const track = state?.track ?? null;
+
+  const youtubeVideoId =
+    track?.provider === "youtube" &&
+    track.videoId &&
+    YOUTUBE_VIDEO_ID_PATTERN.test(track.videoId)
+      ? track.videoId
+      : null;
 
   useEffect(() => {
     function handleMusicUpdate(incoming: RoomMusicState) {
@@ -119,24 +131,22 @@ export default function RoomMusic({
     setLoading(true);
     setError(null);
 
-    socket
-      .timeout(SOCKET_TIMEOUT_MS)
-      .emit(
-        "music:clear",
-        undefined,
-        (timeoutError: Error | null, response?: MusicActionResponse) => {
-          setLoading(false);
+    socket.timeout(SOCKET_TIMEOUT_MS).emit(
+      "music:clear",
+      undefined,
+      (timeoutError: Error | null, response?: MusicActionResponse) => {
+        setLoading(false);
 
-          if (timeoutError) {
-            setError("The server did not respond.");
-            return;
-          }
+        if (timeoutError) {
+          setError("The server did not respond.");
+          return;
+        }
 
-          if (!response?.ok) {
-            setError(response?.error ?? "Unable to clear music");
-          }
-        },
-      );
+        if (!response?.ok) {
+          setError(response?.error ?? "Unable to clear music");
+        }
+      },
+    );
   }
 
   function changePermission(permission: MusicPermission) {
@@ -164,7 +174,9 @@ export default function RoomMusic({
       {!compact && (
         <header>
           <h2 className="text-lg font-semibold">Music</h2>
-          <p className="mt-1 text-sm text-neutral-500">Shared room listening</p>
+          <p className="mt-1 text-sm text-neutral-500">
+            Shared room listening
+          </p>
         </header>
       )}
 
@@ -175,7 +187,7 @@ export default function RoomMusic({
             : "mt-5 rounded-xl bg-neutral-950 p-4"
         }
       >
-        {state?.track ? (
+        {track ? (
           <>
             <div className="flex items-start gap-3">
               <div
@@ -187,22 +199,44 @@ export default function RoomMusic({
 
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
-                  {state.track.title ?? "Shared track"}
+                  {track.title ?? "Shared track"}
                 </p>
 
                 <p className="mt-1 text-xs text-neutral-500">
-                  Shared by {state.track.sharedBy}
+                  Shared by {track.sharedBy}
                 </p>
               </div>
             </div>
 
+            {youtubeVideoId && (
+              <div className="mt-4">
+                <div className="aspect-video overflow-hidden rounded-lg border border-neutral-800 bg-black">
+                  <iframe
+                    key={youtubeVideoId}
+                    src={`https://www.youtube-nocookie.com/embed/${youtubeVideoId}?rel=0`}
+                    title={track.title ?? "Shared YouTube video"}
+                    className="h-full w-full"
+                    loading="lazy"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    allowFullScreen
+                  />
+                </div>
+
+                <p className="mt-2 text-xs text-neutral-500">
+                  Playback is local for now. Shared play, pause, and seek
+                  controls are coming in the next milestone.
+                </p>
+              </div>
+            )}
+
             <a
-              href={state.track.url}
+              href={track.url}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="mt-4 block rounded-lg border border-neutral-700 px-3 py-2 text-center text-sm text-neutral-300 transition hover:bg-neutral-800"
             >
-              Open track ↗
+              {youtubeVideoId ? "Open on YouTube ↗" : "Open track ↗"}
             </a>
           </>
         ) : (
@@ -214,7 +248,9 @@ export default function RoomMusic({
               ♪
             </div>
 
-            <p className="mt-3 text-sm text-neutral-500">Nothing shared yet.</p>
+            <p className="mt-3 text-sm text-neutral-500">
+              Nothing shared yet.
+            </p>
           </div>
         )}
       </div>
@@ -232,7 +268,9 @@ export default function RoomMusic({
             id={`music-permission-${roomId}`}
             value={state?.permission ?? "OWNER_ONLY"}
             onChange={(event) =>
-              changePermission(event.target.value as MusicPermission)
+              changePermission(
+                event.target.value as MusicPermission,
+              )
             }
             className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-sm"
           >
@@ -270,7 +308,7 @@ export default function RoomMusic({
               {loading ? "Sharing..." : "Share"}
             </button>
 
-            {state?.track && (
+            {track && (
               <button
                 type="button"
                 onClick={clearMusic}
@@ -296,7 +334,9 @@ export default function RoomMusic({
         </p>
       )}
 
-      {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+      {error && (
+        <p className="mt-3 text-sm text-red-400">{error}</p>
+      )}
     </section>
   );
 }

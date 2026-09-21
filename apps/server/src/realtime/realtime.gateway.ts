@@ -39,7 +39,6 @@ interface ChatSendPayload {
 interface MusicSetPayload {
   url: string;
   title?: string;
-  provider?: string;
 }
 
 interface MusicPermissionPayload {
@@ -471,8 +470,6 @@ export class RealtimeGateway
         url: payload?.url ?? '',
 
         title: payload?.title,
-
-        provider: payload?.provider,
       });
 
       this.server.to(this.getRoomChannel(roomId)).emit('music:update', state);
