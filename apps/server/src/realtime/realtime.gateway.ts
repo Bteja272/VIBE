@@ -19,7 +19,11 @@ import type { AuthUser, VibeJwtPayload } from '../auth/auth-user';
 
 import { ChatService } from './chat.service';
 
-import { MusicService, type MusicPermission } from './music.service';
+import {
+  MusicService,
+  type MusicPermission,
+  type PlaybackAction,
+} from './music.service';
 
 import { PresenceService } from './presence.service';
 
@@ -43,6 +47,12 @@ interface MusicSetPayload {
 
 interface MusicPermissionPayload {
   permission: MusicPermission;
+}
+
+interface MusicPlaybackPayload {
+  trackId: string;
+  action: PlaybackAction;
+  positionSeconds: number;
 }
 
 @WebSocketGateway({
@@ -579,6 +589,55 @@ export class RealtimeGateway
           error instanceof Error
             ? error.message
             : 'Unable to update music permission',
+      };
+    }
+  }
+
+  @SubscribeMessage('music:playback')
+  async handleMusicPlayback(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: MusicPlaybackPayload,
+  ) {
+    const roomId = client.data.roomId as string | undefined;
+    const presenceId = client.data.presenceId as string | undefined;
+    const user = client.data.user as AuthUser | undefined;
+
+    if (!roomId || !presenceId || !user) {
+      return {
+        ok: false,
+        error: 'Join the room before controlling playback',
+      };
+    }
+
+    const present = await this.presenceService.isPresent(roomId, presenceId);
+
+    if (!present) {
+      return {
+        ok: false,
+        error: 'You are not currently present in this room',
+      };
+    }
+
+    try {
+      const state = await this.musicService.updatePlayback({
+        roomId,
+        user,
+        trackId: payload?.trackId,
+        action: payload?.action,
+        positionSeconds: payload?.positionSeconds,
+      });
+
+      this.server.to(this.getRoomChannel(roomId)).emit('music:update', state);
+
+      return {
+        ok: true,
+        state,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error ? error.message : 'Unable to update playback',
       };
     }
   }

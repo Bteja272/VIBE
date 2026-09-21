@@ -8,6 +8,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
 import { createClient } from 'redis';
 
 import type { AuthUser } from '../auth/auth-user';
@@ -15,11 +16,22 @@ import { DatabaseService } from '../database/database.service';
 
 export type MusicPermission = 'OWNER_ONLY' | 'ANY_MEMBER';
 
+export type PlaybackStatus = 'PLAYING' | 'PAUSED';
+
+export type PlaybackAction = 'PLAY' | 'PAUSE' | 'SEEK';
+
+export interface MusicPlaybackState {
+  status: PlaybackStatus;
+  positionSeconds: number;
+  updatedAt: string;
+}
+
 export interface RoomMusicState {
   roomId: string;
   permission: MusicPermission;
 
   track: {
+    trackId?: string;
     url: string;
     title?: string;
     provider?: string;
@@ -27,7 +39,16 @@ export interface RoomMusicState {
     sharedBy: string;
   } | null;
 
+  playback?: MusicPlaybackState | null;
   updatedAt: string;
+}
+
+export interface PlaybackCommand {
+  roomId: string;
+  user: AuthUser;
+  trackId: string;
+  action: PlaybackAction;
+  positionSeconds: number;
 }
 
 interface ParsedMusicUrl {
@@ -51,6 +72,71 @@ const YOUTUBE_SHORT_HOSTS = new Set([
   'youtu.be',
   'www.youtu.be',
 ]);
+
+const MAX_POSITION_SECONDS = 86_400;
+
+/*
+ * Redis executes this script atomically.
+ *
+ * It checks the current track and permission immediately
+ * before modifying playback state.
+ */
+const UPDATE_PLAYBACK_SCRIPT = `
+  local stored = redis.call('GET', KEYS[1])
+
+  if not stored then
+    return 'NO_TRACK'
+  end
+
+  local state = cjson.decode(stored)
+
+  if not state.track or state.track == cjson.null then
+    return 'NO_TRACK'
+  end
+
+  if not state.track.trackId or
+     state.track.trackId ~= ARGV[1] then
+    return 'STALE_TRACK'
+  end
+
+  if state.track.provider ~= 'youtube' then
+    return 'UNSUPPORTED_TRACK'
+  end
+
+  if state.permission ~= 'ANY_MEMBER' and ARGV[2] ~= '1' then
+    return 'FORBIDDEN'
+  end
+
+  local previousStatus = 'PAUSED'
+
+  if state.playback and state.playback ~= cjson.null then
+    previousStatus = state.playback.status
+  end
+
+  local nextStatus = previousStatus
+
+  if ARGV[3] == 'PLAY' then
+    nextStatus = 'PLAYING'
+  elseif ARGV[3] == 'PAUSE' then
+    nextStatus = 'PAUSED'
+  elseif ARGV[3] ~= 'SEEK' then
+    return 'INVALID_ACTION'
+  end
+
+  state.playback = {
+    status = nextStatus,
+    positionSeconds = tonumber(ARGV[4]),
+    updatedAt = ARGV[5]
+  }
+
+  state.updatedAt = ARGV[5]
+
+  local encoded = cjson.encode(state)
+
+  redis.call('SET', KEYS[1], encoded)
+
+  return encoded
+`;
 
 function parseMusicUrl(input: string): ParsedMusicUrl {
   const url = input.trim();
@@ -109,7 +195,6 @@ function parseMusicUrl(input: string): ParsedMusicUrl {
     };
   }
 
-  // Other music services remain supported as links, not embeds.
   return { url };
 }
 
@@ -153,6 +238,7 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
         roomId,
         permission: 'OWNER_ONLY',
         track: null,
+        playback: null,
         updatedAt: new Date().toISOString(),
       };
     }
@@ -175,18 +261,31 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     );
 
     const parsedUrl = parseMusicUrl(input.url);
+    const now = new Date().toISOString();
 
     const nextState: RoomMusicState = {
       roomId: input.roomId,
       permission: state.permission,
+
       track: {
+        trackId: randomUUID(),
         url: parsedUrl.url,
         title: input.title?.trim() || undefined,
         provider: parsedUrl.provider,
         videoId: parsedUrl.videoId,
         sharedBy: input.user.displayName,
       },
-      updatedAt: new Date().toISOString(),
+
+      playback:
+        parsedUrl.provider === 'youtube'
+          ? {
+              status: 'PAUSED',
+              positionSeconds: 0,
+              updatedAt: now,
+            }
+          : null,
+
+      updatedAt: now,
     };
 
     await this.saveState(nextState);
@@ -209,6 +308,7 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     const nextState: RoomMusicState = {
       ...state,
       track: null,
+      playback: null,
       updatedAt: new Date().toISOString(),
     };
 
@@ -247,25 +347,110 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     return nextState;
   }
 
+  async updatePlayback(
+    command: PlaybackCommand,
+  ): Promise<RoomMusicState> {
+    const {
+      roomId,
+      user,
+      trackId,
+      action,
+      positionSeconds,
+    } = command;
+
+    await this.ensureRoomExists(roomId);
+
+    if (
+      typeof trackId !== 'string' ||
+      !trackId.trim()
+    ) {
+      throw new BadRequestException('Track ID is required');
+    }
+
+    if (
+      action !== 'PLAY' &&
+      action !== 'PAUSE' &&
+      action !== 'SEEK'
+    ) {
+      throw new BadRequestException('Invalid playback action');
+    }
+
+    if (
+      typeof positionSeconds !== 'number' ||
+      !Number.isFinite(positionSeconds) ||
+      positionSeconds < 0 ||
+      positionSeconds > MAX_POSITION_SECONDS
+    ) {
+      throw new BadRequestException('Invalid playback position');
+    }
+
+    const isOwner =
+      user.type === 'REGISTERED' &&
+      (await this.isRoomOwner(roomId, user.id));
+
+    const now = new Date().toISOString();
+
+    const result = await this.redis.eval(
+      UPDATE_PLAYBACK_SCRIPT,
+      {
+        keys: [this.getMusicKey(roomId)],
+        arguments: [
+          trackId,
+          isOwner ? '1' : '0',
+          action,
+          String(positionSeconds),
+          now,
+        ],
+      },
+    );
+
+    if (result === 'NO_TRACK') {
+      throw new BadRequestException('No shared track is available');
+    }
+
+    if (result === 'STALE_TRACK') {
+      throw new BadRequestException(
+        'This track has been replaced. Refresh the player.',
+      );
+    }
+
+    if (result === 'UNSUPPORTED_TRACK') {
+      throw new BadRequestException(
+        'Shared playback is currently supported for YouTube only',
+      );
+    }
+
+    if (result === 'FORBIDDEN') {
+      throw new ForbiddenException(
+        'Only the room owner can control music',
+      );
+    }
+
+    if (result === 'INVALID_ACTION') {
+      throw new BadRequestException('Invalid playback action');
+    }
+
+    if (typeof result !== 'string') {
+      throw new Error('Unexpected Redis playback response');
+    }
+
+    return JSON.parse(result) as RoomMusicState;
+  }
+
   private async ensureCanControlMusic(
     roomId: string,
     user: AuthUser,
     permission: MusicPermission,
   ) {
     if (permission === 'ANY_MEMBER') {
-      // The gateway verifies active presence before calling this method.
+      // The gateway verifies active presence.
       return;
     }
 
-    if (user.type !== 'REGISTERED') {
-      throw new ForbiddenException(
-        'Only the room owner can control music',
-      );
-    }
-
-    const owner = await this.isRoomOwner(roomId, user.id);
-
-    if (!owner) {
+    if (
+      user.type !== 'REGISTERED' ||
+      !(await this.isRoomOwner(roomId, user.id))
+    ) {
       throw new ForbiddenException(
         'Only the room owner can control music',
       );
