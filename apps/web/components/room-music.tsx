@@ -1,6 +1,12 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import SharedYouTubePlayer, {
   type MusicPlaybackState,
@@ -15,6 +21,14 @@ type PlaybackAction = "PLAY" | "PAUSE" | "SEEK";
 
 interface RoomMusicState {
   roomId: string;
+
+  /*
+   * Monotonically increasing version supplied by the backend.
+   *
+   * It prevents an older Socket.IO acknowledgement from
+   * replacing newer room state.
+   */
+  revision?: number;
 
   permission: MusicPermission;
 
@@ -54,11 +68,11 @@ const PERSONAL_MUTE_KEY = "vibe_personal_music_muted";
 const YOUTUBE_VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 
 /*
- * room:watch and presence restoration may occur in another
- * component immediately after Socket.IO reconnects.
+ * room:watch and presence restoration may occur
+ * elsewhere immediately after Socket.IO reconnects.
  *
- * Retrying music:get prevents a harmless startup race from leaving
- * this popover stale until the next music:update event.
+ * Retrying music:get prevents that startup race
+ * from leaving shared music stale.
  */
 const RECONNECT_SYNC_DELAYS_MS = [0, 250, 750, 1500];
 
@@ -92,6 +106,67 @@ function formatTime(seconds: number): string {
   return `${minutes}:${remainder}`;
 }
 
+function getTrackIdentity(state: RoomMusicState | null): string | null {
+  const track = state?.track;
+
+  if (!track) {
+    return null;
+  }
+
+  return track.trackId ?? track.videoId ?? track.url;
+}
+
+/*
+ * revision is the primary ordering mechanism.
+ *
+ * updatedAt remains as a compatibility fallback for
+ * any older state produced before revisions existed.
+ */
+function shouldAcceptState(
+  current: RoomMusicState | null,
+  incoming: RoomMusicState,
+): boolean {
+  if (!current) {
+    return true;
+  }
+
+  const currentRevision =
+    typeof current.revision === "number" && Number.isFinite(current.revision)
+      ? current.revision
+      : null;
+
+  const incomingRevision =
+    typeof incoming.revision === "number" && Number.isFinite(incoming.revision)
+      ? incoming.revision
+      : null;
+
+  if (currentRevision !== null && incomingRevision !== null) {
+    return incomingRevision >= currentRevision;
+  }
+
+  /*
+   * Never allow legacy unversioned state to
+   * overwrite state from the revised backend.
+   */
+  if (currentRevision !== null && incomingRevision === null) {
+    return false;
+  }
+
+  if (currentRevision === null && incomingRevision !== null) {
+    return true;
+  }
+
+  const currentTime = Date.parse(current.updatedAt);
+
+  const incomingTime = Date.parse(incoming.updatedAt);
+
+  if (!Number.isFinite(currentTime) || !Number.isFinite(incomingTime)) {
+    return true;
+  }
+
+  return incomingTime >= currentTime;
+}
+
 export default function RoomMusic({
   roomId,
   isOwner,
@@ -99,6 +174,13 @@ export default function RoomMusic({
   compact = false,
 }: RoomMusicProps) {
   const [state, setState] = useState<RoomMusicState | null>(null);
+
+  /*
+   * Keeps synchronous event callbacks aware of
+   * the newest accepted music state without making
+   * state itself an effect dependency.
+   */
+  const stateRef = useRef<RoomMusicState | null>(null);
 
   const [url, setUrl] = useState("");
 
@@ -122,12 +204,18 @@ export default function RoomMusic({
 
   const playerRef = useRef<SharedYouTubePlayerHandle | null>(null);
 
+  /*
+   * A stale previous-room value may exist for one render
+   * while routing. Never render it for another room.
+   */
+  const activeState = state?.roomId === roomId ? state : null;
+
   const canEditMusic =
-    canControl && (isOwner || state?.permission === "ANY_MEMBER");
+    canControl && (isOwner || activeState?.permission === "ANY_MEMBER");
 
-  const track = state?.track ?? null;
+  const track = activeState?.track ?? null;
 
-  const playback = state?.playback ?? null;
+  const playback = activeState?.playback ?? null;
 
   const youtubeVideoId =
     track?.provider === "youtube" &&
@@ -144,32 +232,91 @@ export default function RoomMusic({
 
   const shownSeconds = Math.min(
     seekMaximum || MAX_POSITION_SECONDS,
+
     seekPreview ?? currentSeconds,
   );
 
   /*
-   * Personal audio preference belongs only to this browser session.
+   * Central entry point for all authoritative state:
+   *
+   * - music:update broadcasts
+   * - music:get responses
+   * - command acknowledgements
+   *
+   * Visual track state is reset here rather than from
+   * a React effect. Socket callbacks and user-action
+   * callbacks are legitimate places to update state.
+   */
+  const acceptState = useCallback(
+    (incoming: RoomMusicState) => {
+      if (incoming.roomId !== roomId) {
+        return;
+      }
+
+      const current =
+        stateRef.current?.roomId === roomId ? stateRef.current : null;
+
+      if (!shouldAcceptState(current, incoming)) {
+        return;
+      }
+
+      const previousTrack = getTrackIdentity(current);
+
+      const nextTrack = getTrackIdentity(incoming);
+
+      if (previousTrack !== nextTrack) {
+        setDuration(0);
+
+        setCurrentSeconds(
+          incoming.playback ? expectedPosition(incoming.playback) : 0,
+        );
+
+        setSeekPreview(null);
+      }
+
+      stateRef.current = incoming;
+
+      setState(incoming);
+    },
+    [roomId],
+  );
+
+  /*
+   * Load the browser-local mute preference.
+   *
+   * requestAnimationFrame moves the state update out
+   * of the synchronous effect body while still loading
+   * it immediately after mount.
    */
   useEffect(() => {
-    try {
-      setPersonalMuted(
-        window.sessionStorage.getItem(PERSONAL_MUTE_KEY) === "true",
-      );
-    } catch {
-      // Personal mute still works when session storage is unavailable.
-    }
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        setPersonalMuted(
+          window.sessionStorage.getItem(PERSONAL_MUTE_KEY) === "true",
+        );
+      } catch {
+        /*
+         * sessionStorage may be unavailable.
+         * The default false state still works.
+         */
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   /*
-   * Authoritative music state subscription.
+   * Authoritative room-music subscription.
    *
-   * music:update handles normal live updates.
+   * music:update handles live changes.
    *
    * music:get handles:
-   * - initial open
+   * - initial mount
    * - reconnect
    * - room restoration
-   * - returning from a sleeping/background tab
+   * - returning from a background tab
    */
   useEffect(() => {
     let active = true;
@@ -185,11 +332,11 @@ export default function RoomMusic({
     }
 
     function handleMusicUpdate(incoming: RoomMusicState) {
-      if (!active || incoming.roomId !== roomId) {
+      if (!active) {
         return;
       }
 
-      setState(incoming);
+      acceptState(incoming);
     }
 
     function loadMusicState() {
@@ -197,24 +344,22 @@ export default function RoomMusic({
         return;
       }
 
-      socket
-        .timeout(SOCKET_TIMEOUT_MS)
-        .emit(
-          "music:get",
-          undefined,
-          (timeoutError: Error | null, response?: MusicActionResponse) => {
-            if (
-              timeoutError ||
-              !active ||
-              !response?.ok ||
-              response.state?.roomId !== roomId
-            ) {
-              return;
-            }
+      socket.timeout(SOCKET_TIMEOUT_MS).emit(
+        "music:get",
+        undefined,
 
-            setState(response.state);
-          },
-        );
+        (
+          timeoutError: Error | null,
+
+          response?: MusicActionResponse,
+        ) => {
+          if (timeoutError || !active || !response?.ok || !response.state) {
+            return;
+          }
+
+          acceptState(response.state);
+        },
+      );
     }
 
     function scheduleReconnectSync() {
@@ -232,9 +377,6 @@ export default function RoomMusic({
         loadMusicState();
       }
     }
-
-    setState(null);
-    setError(null);
 
     socket.on("music:update", handleMusicUpdate);
 
@@ -257,24 +399,14 @@ export default function RoomMusic({
 
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [roomId]);
+  }, [acceptState]);
 
   /*
-   * Reset purely visual progress state when the shared track changes.
-   */
-  useEffect(() => {
-    setDuration(0);
-
-    setCurrentSeconds(playback ? expectedPosition(playback) : 0);
-
-    setSeekPreview(null);
-  }, [track?.trackId, track?.videoId]);
-
-  /*
-   * This timer is DISPLAY ONLY.
+   * DISPLAY TIMER ONLY.
    *
-   * It does not seek the player and does not emit Socket.IO events.
-   * Actual drift correction lives inside SharedYouTubePlayer.
+   * This does not seek playback and does not send
+   * Socket.IO commands. SharedYouTubePlayer owns
+   * actual synchronization.
    */
   useEffect(() => {
     if (!playback || !youtubeVideoId) {
@@ -293,16 +425,22 @@ export default function RoomMusic({
       const displayedTime =
         typeof localTime === "number" && Number.isFinite(localTime)
           ? localTime
-          : expectedPosition(playback);
+          : expectedPosition(playback!);
 
       setCurrentSeconds(Math.max(0, displayedTime));
     }
 
-    refreshDisplay();
+    /*
+     * Avoid performing synchronous component state
+     * updates directly inside the effect body.
+     */
+    const firstFrame = window.requestAnimationFrame(refreshDisplay);
 
     const timer = window.setInterval(refreshDisplay, 1000);
 
     return () => {
+      window.cancelAnimationFrame(firstFrame);
+
       window.clearInterval(timer);
     };
   }, [playback, youtubeVideoId]);
@@ -319,6 +457,7 @@ export default function RoomMusic({
 
     socket.timeout(SOCKET_TIMEOUT_MS).emit(
       "music:set",
+
       {
         url: url.trim(),
 
@@ -346,8 +485,8 @@ export default function RoomMusic({
         setTitle("");
         setSharingOpen(false);
 
-        if (response.state?.roomId === roomId) {
-          setState(response.state);
+        if (response.state) {
+          acceptState(response.state);
         }
       },
     );
@@ -382,8 +521,8 @@ export default function RoomMusic({
           return;
         }
 
-        if (response.state?.roomId === roomId) {
-          setState(response.state);
+        if (response.state) {
+          acceptState(response.state);
         }
       },
     );
@@ -394,7 +533,10 @@ export default function RoomMusic({
 
     socket.timeout(SOCKET_TIMEOUT_MS).emit(
       "music:permission",
-      { permission },
+
+      {
+        permission,
+      },
 
       (
         timeoutError: Error | null,
@@ -411,8 +553,8 @@ export default function RoomMusic({
           return;
         }
 
-        if (response.state?.roomId === roomId) {
-          setState(response.state);
+        if (response.state) {
+          acceptState(response.state);
         }
       },
     );
@@ -425,7 +567,10 @@ export default function RoomMusic({
       try {
         window.sessionStorage.setItem(PERSONAL_MUTE_KEY, String(next));
       } catch {
-        // Keep the preference in component state.
+        /*
+         * Keep the preference in component state
+         * if storage is unavailable.
+         */
       }
 
       return next;
@@ -454,6 +599,7 @@ export default function RoomMusic({
     );
 
     setPlaybackLoading(true);
+
     setError(null);
 
     socket.timeout(SOCKET_TIMEOUT_MS).emit(
@@ -484,8 +630,13 @@ export default function RoomMusic({
           return;
         }
 
-        if (response.state?.roomId === roomId) {
-          setState(response.state);
+        /*
+         * This acknowledgement could arrive after
+         * a newer music:update. Revision checking
+         * prevents rolling state backwards.
+         */
+        if (response.state) {
+          acceptState(response.state);
         }
       },
     );
@@ -501,14 +652,24 @@ export default function RoomMusic({
 
     const localPosition = playerRef.current?.getCurrentTime();
 
-    const position =
+    let position =
       typeof localPosition === "number" && Number.isFinite(localPosition)
         ? localPosition
         : expectedPosition(playback);
 
     /*
-     * Calling play() from the user's click helps this controlling
-     * browser satisfy autoplay policies.
+     * Replaying after natural completion should
+     * restart from the beginning.
+     */
+    if (action === "PLAY" && duration > 0 && position >= duration - 0.75) {
+      position = 0;
+    }
+
+    /*
+     * Direct invocation from the click helps the
+     * controlling browser pass autoplay restrictions.
+     *
+     * Redis remains authoritative.
      */
     if (action === "PLAY") {
       playerRef.current?.play();
@@ -526,13 +687,34 @@ export default function RoomMusic({
 
     const boundedValue = Math.min(duration, Math.max(0, value));
 
-    /*
-     * Optimistic display update prevents the slider from briefly
-     * snapping back before the authoritative server update arrives.
-     */
     setCurrentSeconds(boundedValue);
 
     sendPlaybackCommand("SEEK", boundedValue);
+  }
+
+  function handleTrackEnded(positionSeconds: number) {
+    /*
+     * Every local YouTube player can detect completion,
+     * but only an authorized controller may mutate the
+     * shared room state.
+     */
+    if (!canEditMusic || !playback || playback.status !== "PLAYING") {
+      return;
+    }
+
+    const boundedPosition = Math.max(
+      0,
+      Math.min(MAX_POSITION_SECONDS, positionSeconds),
+    );
+
+    setCurrentSeconds(boundedPosition);
+
+    /*
+     * Natural completion maps to PAUSED at the final
+     * timestamp rather than introducing a third
+     * playback state.
+     */
+    sendPlaybackCommand("PAUSE", boundedPosition);
   }
 
   return (
@@ -582,6 +764,7 @@ export default function RoomMusic({
                   playback={playback}
                   title={track.title ?? "Shared YouTube video"}
                   muted={personalMuted}
+                  onEnded={handleTrackEnded}
                 />
 
                 {hasSharedControls && (
@@ -639,7 +822,12 @@ export default function RoomMusic({
                         step={1}
                         value={Math.min(
                           seekMaximum || 1,
-                          Math.max(0, seekPreview ?? currentSeconds),
+
+                          Math.max(
+                            0,
+
+                            seekPreview ?? currentSeconds,
+                          ),
                         )}
                         onChange={(event) =>
                           setSeekPreview(Number(event.target.value))
@@ -741,7 +929,7 @@ export default function RoomMusic({
                 <label className="block text-xs text-neutral-400">
                   Who can share music?
                   <select
-                    value={state?.permission ?? "OWNER_ONLY"}
+                    value={activeState?.permission ?? "OWNER_ONLY"}
                     onChange={(event) =>
                       changePermission(event.target.value as MusicPermission)
                     }

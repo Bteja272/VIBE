@@ -1,4 +1,3 @@
-
 import {
   BadRequestException,
   ForbiddenException,
@@ -28,6 +27,15 @@ export interface MusicPlaybackState {
 
 export interface RoomMusicState {
   roomId: string;
+
+  /*
+   * Monotonically increasing room-music revision.
+   *
+   * Clients use this to reject stale Socket.IO acknowledgements
+   * or broadcasts that arrive after a newer state.
+   */
+  revision: number;
+
   permission: MusicPermission;
 
   track: {
@@ -40,6 +48,7 @@ export interface RoomMusicState {
   } | null;
 
   playback?: MusicPlaybackState | null;
+
   updatedAt: string;
 }
 
@@ -68,18 +77,20 @@ const YOUTUBE_HOSTS = new Set([
   'www.youtube-nocookie.com',
 ]);
 
-const YOUTUBE_SHORT_HOSTS = new Set([
-  'youtu.be',
-  'www.youtu.be',
-]);
+const YOUTUBE_SHORT_HOSTS = new Set(['youtu.be', 'www.youtu.be']);
 
 const MAX_POSITION_SECONDS = 86_400;
 
 /*
  * Redis executes this script atomically.
  *
- * It checks the current track and permission immediately
- * before modifying playback state.
+ * It verifies:
+ * - a track still exists
+ * - the command belongs to the current track
+ * - the track supports shared playback
+ * - the user still has permission
+ *
+ * Only after those checks does it update playback state.
  */
 const UPDATE_PLAYBACK_SCRIPT = `
   local stored = redis.call('GET', KEYS[1])
@@ -123,6 +134,9 @@ const UPDATE_PLAYBACK_SCRIPT = `
     return 'INVALID_ACTION'
   end
 
+  state.revision =
+    (state.revision or 0) + 1
+
   state.playback = {
     status = nextStatus,
     positionSeconds = tonumber(ARGV[4]),
@@ -133,7 +147,11 @@ const UPDATE_PLAYBACK_SCRIPT = `
 
   local encoded = cjson.encode(state)
 
-  redis.call('SET', KEYS[1], encoded)
+  redis.call(
+    'SET',
+    KEYS[1],
+    encoded
+  )
 
   return encoded
 `;
@@ -183,9 +201,7 @@ function parseMusicUrl(input: string): ParsedMusicUrl {
     }
 
     if (!videoId || !YOUTUBE_VIDEO_ID_PATTERN.test(videoId)) {
-      throw new BadRequestException(
-        'Provide a valid YouTube video URL',
-      );
+      throw new BadRequestException('Provide a valid YouTube video URL');
     }
 
     return {
@@ -195,7 +211,9 @@ function parseMusicUrl(input: string): ParsedMusicUrl {
     };
   }
 
-  return { url };
+  return {
+    url,
+  };
 }
 
 @Injectable()
@@ -207,10 +225,11 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     private readonly databaseService: DatabaseService,
   ) {
     const redisUrl =
-      this.configService.get<string>('REDIS_URL') ??
-      'redis://localhost:6379';
+      this.configService.get<string>('REDIS_URL') ?? 'redis://localhost:6379';
 
-    this.redis = createClient({ url: redisUrl });
+    this.redis = createClient({
+      url: redisUrl,
+    });
 
     this.redis.on('error', (error) => {
       console.error('Redis music error:', error);
@@ -219,6 +238,7 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     await this.redis.connect();
+
     console.log('Redis music service connected');
   }
 
@@ -236,6 +256,7 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     if (!stored) {
       return {
         roomId,
+        revision: 0,
         permission: 'OWNER_ONLY',
         track: null,
         playback: null,
@@ -243,7 +264,21 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    return JSON.parse(stored) as RoomMusicState;
+    const parsed = JSON.parse(stored) as Partial<RoomMusicState>;
+
+    /*
+     * Existing Redis state created before revisions were introduced
+     * may not contain revision yet.
+     *
+     * Normalize that state here instead of forcing a Redis migration.
+     */
+    return {
+      ...(parsed as RoomMusicState),
+      revision:
+        typeof parsed.revision === 'number' && Number.isFinite(parsed.revision)
+          ? Math.max(0, parsed.revision)
+          : 0,
+    };
   }
 
   async setTrack(input: {
@@ -261,18 +296,26 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     );
 
     const parsedUrl = parseMusicUrl(input.url);
+
     const now = new Date().toISOString();
 
     const nextState: RoomMusicState = {
       roomId: input.roomId,
+
+      revision: state.revision + 1,
+
       permission: state.permission,
 
       track: {
         trackId: randomUUID(),
         url: parsedUrl.url,
+
         title: input.title?.trim() || undefined,
+
         provider: parsedUrl.provider,
+
         videoId: parsedUrl.videoId,
+
         sharedBy: input.user.displayName,
       },
 
@@ -293,22 +336,20 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     return nextState;
   }
 
-  async clearTrack(
-    roomId: string,
-    user: AuthUser,
-  ): Promise<RoomMusicState> {
+  async clearTrack(roomId: string, user: AuthUser): Promise<RoomMusicState> {
     const state = await this.getState(roomId);
 
-    await this.ensureCanControlMusic(
-      roomId,
-      user,
-      state.permission,
-    );
+    await this.ensureCanControlMusic(roomId, user, state.permission);
 
     const nextState: RoomMusicState = {
       ...state,
+
+      revision: state.revision + 1,
+
       track: null,
+
       playback: null,
+
       updatedAt: new Date().toISOString(),
     };
 
@@ -338,7 +379,11 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
 
     const nextState: RoomMusicState = {
       ...state,
+
+      revision: state.revision + 1,
+
       permission,
+
       updatedAt: new Date().toISOString(),
     };
 
@@ -347,31 +392,16 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     return nextState;
   }
 
-  async updatePlayback(
-    command: PlaybackCommand,
-  ): Promise<RoomMusicState> {
-    const {
-      roomId,
-      user,
-      trackId,
-      action,
-      positionSeconds,
-    } = command;
+  async updatePlayback(command: PlaybackCommand): Promise<RoomMusicState> {
+    const { roomId, user, trackId, action, positionSeconds } = command;
 
     await this.ensureRoomExists(roomId);
 
-    if (
-      typeof trackId !== 'string' ||
-      !trackId.trim()
-    ) {
+    if (typeof trackId !== 'string' || !trackId.trim()) {
       throw new BadRequestException('Track ID is required');
     }
 
-    if (
-      action !== 'PLAY' &&
-      action !== 'PAUSE' &&
-      action !== 'SEEK'
-    ) {
+    if (action !== 'PLAY' && action !== 'PAUSE' && action !== 'SEEK') {
       throw new BadRequestException('Invalid playback action');
     }
 
@@ -385,24 +415,21 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     }
 
     const isOwner =
-      user.type === 'REGISTERED' &&
-      (await this.isRoomOwner(roomId, user.id));
+      user.type === 'REGISTERED' && (await this.isRoomOwner(roomId, user.id));
 
     const now = new Date().toISOString();
 
-    const result = await this.redis.eval(
-      UPDATE_PLAYBACK_SCRIPT,
-      {
-        keys: [this.getMusicKey(roomId)],
-        arguments: [
-          trackId,
-          isOwner ? '1' : '0',
-          action,
-          String(positionSeconds),
-          now,
-        ],
-      },
-    );
+    const result = await this.redis.eval(UPDATE_PLAYBACK_SCRIPT, {
+      keys: [this.getMusicKey(roomId)],
+
+      arguments: [
+        trackId,
+        isOwner ? '1' : '0',
+        action,
+        String(positionSeconds),
+        now,
+      ],
+    });
 
     if (result === 'NO_TRACK') {
       throw new BadRequestException('No shared track is available');
@@ -421,9 +448,7 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (result === 'FORBIDDEN') {
-      throw new ForbiddenException(
-        'Only the room owner can control music',
-      );
+      throw new ForbiddenException('Only the room owner can control music');
     }
 
     if (result === 'INVALID_ACTION') {
@@ -434,7 +459,21 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
       throw new Error('Unexpected Redis playback response');
     }
 
-    return JSON.parse(result) as RoomMusicState;
+    const parsed = JSON.parse(result) as RoomMusicState;
+
+    /*
+     * The Lua script always increments revision before returning,
+     * but normalizing here keeps the TypeScript contract defensive
+     * if legacy state somehow reaches this path.
+     */
+    return {
+      ...parsed,
+
+      revision:
+        typeof parsed.revision === 'number' && Number.isFinite(parsed.revision)
+          ? Math.max(0, parsed.revision)
+          : 0,
+    };
   }
 
   private async ensureCanControlMusic(
@@ -443,7 +482,10 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
     permission: MusicPermission,
   ) {
     if (permission === 'ANY_MEMBER') {
-      // The gateway verifies active presence.
+      /*
+       * The realtime gateway verifies active room presence
+       * before calling this service.
+       */
       return;
     }
 
@@ -451,16 +493,19 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
       user.type !== 'REGISTERED' ||
       !(await this.isRoomOwner(roomId, user.id))
     ) {
-      throw new ForbiddenException(
-        'Only the room owner can control music',
-      );
+      throw new ForbiddenException('Only the room owner can control music');
     }
   }
 
   private async isRoomOwner(roomId: string, userId: string) {
     const room = await this.databaseService.client.room.findUnique({
-      where: { id: roomId },
-      select: { ownerId: true },
+      where: {
+        id: roomId,
+      },
+
+      select: {
+        ownerId: true,
+      },
     });
 
     if (!room) {
@@ -472,8 +517,13 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
 
   private async ensureRoomExists(roomId: string) {
     const room = await this.databaseService.client.room.findUnique({
-      where: { id: roomId },
-      select: { id: true },
+      where: {
+        id: roomId,
+      },
+
+      select: {
+        id: true,
+      },
     });
 
     if (!room) {
@@ -484,6 +534,7 @@ export class MusicService implements OnModuleInit, OnModuleDestroy {
   private async saveState(state: RoomMusicState) {
     await this.redis.set(
       this.getMusicKey(state.roomId),
+
       JSON.stringify(state),
     );
   }

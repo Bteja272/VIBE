@@ -1,4 +1,4 @@
-import type { Room } from "@/types/room";
+import type { Room } from "@/src/types/room";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ??

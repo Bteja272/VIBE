@@ -2,6 +2,7 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -25,6 +26,7 @@ interface SharedYouTubePlayerProps {
   playback: MusicPlaybackState;
   title: string;
   muted: boolean;
+  onEnded?: (positionSeconds: number) => void;
 }
 
 interface YouTubePlayer {
@@ -40,6 +42,11 @@ interface YouTubePlayer {
 
 interface YouTubePlayerEvent {
   target: YouTubePlayer;
+}
+
+interface YouTubePlayerStateEvent {
+  target: YouTubePlayer;
+  data: number;
 }
 
 interface YouTubePlayerOptions {
@@ -58,7 +65,11 @@ interface YouTubePlayerOptions {
 
   events: {
     onReady: (event: YouTubePlayerEvent) => void;
+
+    onStateChange: (event: YouTubePlayerStateEvent) => void;
+
     onError: () => void;
+
     onAutoplayBlocked: () => void;
   };
 }
@@ -79,18 +90,23 @@ declare global {
 
 const DRIFT_CHECK_INTERVAL_MS = 5000;
 
-/*
- * While playing we tolerate a small amount of natural browser /
- * network drift. Constant tiny seeks make video playback feel worse
- * than being about a second out of sync.
- */
 const PLAYING_DRIFT_THRESHOLD_SECONDS = 1.75;
 
-/*
- * Paused state should be more precise because there is no natural
- * playback movement once the authoritative pause has arrived.
- */
 const PAUSED_DRIFT_THRESHOLD_SECONDS = 0.35;
+
+/*
+ * YouTube IFrame API state values:
+ *
+ * -1 = unstarted
+ *  0 = ended
+ *  1 = playing
+ *  2 = paused
+ *  3 = buffering
+ *  5 = cued
+ */
+const YOUTUBE_PLAYER_STATE_ENDED = 0;
+
+const YOUTUBE_PLAYER_STATE_PLAYING = 1;
 
 let apiPromise: Promise<YouTubeAPI> | null = null;
 
@@ -111,6 +127,7 @@ function loadYouTubeAPI(): Promise<YouTubeAPI> {
 
       if (window.YT?.Player) {
         resolve(window.YT);
+
         return;
       }
 
@@ -159,7 +176,10 @@ function expectedPosition(playback: MusicPlaybackState): number {
   return Math.max(0, playback.positionSeconds + elapsedSeconds);
 }
 
-function getBoundedTarget(player: YouTubePlayer, playback: MusicPlaybackState) {
+function getBoundedTarget(
+  player: YouTubePlayer,
+  playback: MusicPlaybackState,
+): number {
   const target = expectedPosition(playback);
 
   const duration = player.getDuration();
@@ -178,14 +198,30 @@ function getBoundedTarget(player: YouTubePlayer, playback: MusicPlaybackState) {
 const SharedYouTubePlayer = forwardRef<
   SharedYouTubePlayerHandle,
   SharedYouTubePlayerProps
->(function SharedYouTubePlayer({ videoId, playback, title, muted }, ref) {
+>(function SharedYouTubePlayer(
+  { videoId, playback, title, muted, onEnded },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const playerRef = useRef<YouTubePlayer | null>(null);
 
+  /*
+   * Async YouTube callbacks and timers must always
+   * observe the newest authoritative room state.
+   */
   const playbackRef = useRef(playback);
 
   const mutedRef = useRef(muted);
+
+  const onEndedRef = useRef(onEnded);
+
+  /*
+   * YouTube may emit multiple transitions around
+   * natural completion. Only report a completion
+   * once per playback lifecycle.
+   */
+  const endedReportedRef = useRef(false);
 
   const [ready, setReady] = useState(false);
 
@@ -194,83 +230,124 @@ const SharedYouTubePlayer = forwardRef<
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
 
   /*
-   * Async YouTube callbacks and interval callbacks read from refs,
-   * so they always use the newest authoritative state.
+   * Refs are intentionally updated during render.
+   * They do not trigger another render and ensure
+   * callbacks do not capture stale props.
    */
   playbackRef.current = playback;
+
   mutedRef.current = muted;
 
-  function correctPosition(player: YouTubePlayer, force = false) {
-    const currentPlayback = playbackRef.current;
-
-    const target = getBoundedTarget(player, currentPlayback);
-
-    const current = player.getCurrentTime();
-
-    const threshold =
-      currentPlayback.status === "PLAYING"
-        ? PLAYING_DRIFT_THRESHOLD_SECONDS
-        : PAUSED_DRIFT_THRESHOLD_SECONDS;
-
-    const shouldSeek =
-      force ||
-      typeof current !== "number" ||
-      !Number.isFinite(current) ||
-      Math.abs(current - target) > threshold;
-
-    if (shouldSeek) {
-      player.seekTo(target, true);
-    }
-  }
-
-  function applyAuthoritativePlayback(
-    player: YouTubePlayer,
-    forcePosition = false,
-  ) {
-    const currentPlayback = playbackRef.current;
-
-    correctPosition(player, forcePosition);
-
-    if (currentPlayback.status === "PLAYING") {
-      player.playVideo();
-    } else {
-      player.pauseVideo();
-
-      setAutoplayBlocked(false);
-    }
-  }
-
-  useImperativeHandle(ref, () => ({
-    getCurrentTime() {
-      const seconds = playerRef.current?.getCurrentTime();
-
-      if (typeof seconds === "number" && Number.isFinite(seconds)) {
-        return Math.max(0, seconds);
-      }
-
-      return expectedPosition(playbackRef.current);
-    },
-
-    getDuration() {
-      const seconds = playerRef.current?.getDuration();
-
-      if (typeof seconds === "number" && Number.isFinite(seconds)) {
-        return Math.max(0, seconds);
-      }
-
-      return 0;
-    },
-
-    play() {
-      playerRef.current?.playVideo();
-    },
-  }));
+  onEndedRef.current = onEnded;
 
   /*
-   * Create the YouTube player.
+   * Local drift correction only.
    *
-   * A newly mounted player must force-sync to the current room
-   * position because it may be joining several minutes into a track.
+   * This function never emits Socket.IO commands and
+   * never writes to Redis.
+   */
+  const correctPosition = useCallback(
+    (
+      player: YouTubePlayer,
+
+      force = false,
+    ) => {
+      const currentPlayback = playbackRef.current;
+
+      const target = getBoundedTarget(player, currentPlayback);
+
+      const current = player.getCurrentTime();
+
+      const threshold =
+        currentPlayback.status === "PLAYING"
+          ? PLAYING_DRIFT_THRESHOLD_SECONDS
+          : PAUSED_DRIFT_THRESHOLD_SECONDS;
+
+      const shouldSeek =
+        force ||
+        typeof current !== "number" ||
+        !Number.isFinite(current) ||
+        Math.abs(current - target) > threshold;
+
+      if (shouldSeek) {
+        player.seekTo(target, true);
+      }
+    },
+    [],
+  );
+
+  /*
+   * Apply the latest server-authoritative playback
+   * state to the local YouTube player.
+   */
+  const applyAuthoritativePlayback = useCallback(
+    (
+      player: YouTubePlayer,
+
+      forcePosition = false,
+    ) => {
+      const currentPlayback = playbackRef.current;
+
+      correctPosition(player, forcePosition);
+
+      if (currentPlayback.status === "PLAYING") {
+        player.playVideo();
+      } else {
+        player.pauseVideo();
+      }
+    },
+    [correctPosition],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getCurrentTime() {
+        const seconds = playerRef.current?.getCurrentTime();
+
+        if (typeof seconds === "number" && Number.isFinite(seconds)) {
+          return Math.max(0, seconds);
+        }
+
+        return expectedPosition(playbackRef.current);
+      },
+
+      getDuration() {
+        const seconds = playerRef.current?.getDuration();
+
+        if (typeof seconds === "number" && Number.isFinite(seconds)) {
+          return Math.max(0, seconds);
+        }
+
+        return 0;
+      },
+
+      play() {
+        playerRef.current?.playVideo();
+      },
+    }),
+    [],
+  );
+
+  /*
+   * A fresh PLAYING command starts a new possible
+   * completion lifecycle.
+   *
+   * Ref mutation is sufficient here; no component
+   * state update is needed.
+   */
+  useEffect(() => {
+    if (playback.status === "PLAYING") {
+      endedReportedRef.current = false;
+    }
+  }, [playback.status, playback.updatedAt]);
+
+  /*
+   * Create the YouTube IFrame player.
+   *
+   * RoomMusic keys this component by track identity,
+   * so a different shared track receives a fresh
+   * component/player lifecycle.
    */
   useEffect(() => {
     let disposed = false;
@@ -279,9 +356,11 @@ const SharedYouTubePlayer = forwardRef<
 
     const container = containerRef.current;
 
-    setReady(false);
-    setPlayerError(null);
-    setAutoplayBlocked(false);
+    /*
+     * Ref mutation does not cause a render and avoids
+     * set-state-in-effect lint violations.
+     */
+    endedReportedRef.current = false;
 
     if (!container) {
       return;
@@ -297,6 +376,7 @@ const SharedYouTubePlayer = forwardRef<
           videoId,
 
           width: "100%",
+
           height: "100%",
 
           playerVars: {
@@ -305,6 +385,7 @@ const SharedYouTubePlayer = forwardRef<
             disablekb: 1,
             playsinline: 1,
             rel: 0,
+
             origin: window.location.origin,
           },
 
@@ -316,6 +397,9 @@ const SharedYouTubePlayer = forwardRef<
 
               playerRef.current = event.target;
 
+              /*
+               * Personal mute is local only.
+               */
               if (mutedRef.current) {
                 event.target.mute();
               } else {
@@ -323,33 +407,93 @@ const SharedYouTubePlayer = forwardRef<
               }
 
               /*
-               * Late join / remount synchronization.
+               * Late joiners and remounted players
+               * immediately jump to the current
+               * authoritative room position.
                */
               applyAuthoritativePlayback(event.target, true);
 
               setReady(true);
             },
 
-            onError() {
-              if (!disposed) {
-                setPlayerError(
-                  "YouTube could not play this video. Try opening it on YouTube.",
-                );
+            onStateChange(event) {
+              if (disposed) {
+                return;
               }
+
+              /*
+               * Successful playback means autoplay
+               * is no longer blocked locally.
+               *
+               * This callback comes from the
+               * external YouTube API, so updating
+               * React state here is appropriate.
+               */
+              if (event.data === YOUTUBE_PLAYER_STATE_PLAYING) {
+                setAutoplayBlocked(false);
+
+                return;
+              }
+
+              if (
+                event.data !== YOUTUBE_PLAYER_STATE_ENDED ||
+                endedReportedRef.current ||
+                playbackRef.current.status !== "PLAYING"
+              ) {
+                return;
+              }
+
+              endedReportedRef.current = true;
+
+              const duration = event.target.getDuration();
+
+              const currentTime = event.target.getCurrentTime();
+
+              /*
+               * Duration is the ideal final
+               * timestamp. Current time is the
+               * fallback if YouTube does not expose
+               * duration for some reason.
+               */
+              const endingPosition =
+                typeof duration === "number" &&
+                Number.isFinite(duration) &&
+                duration > 0
+                  ? duration
+                  : typeof currentTime === "number" &&
+                      Number.isFinite(currentTime)
+                    ? Math.max(0, currentTime)
+                    : 0;
+
+              onEndedRef.current?.(endingPosition);
+            },
+
+            onError() {
+              if (disposed) {
+                return;
+              }
+
+              setPlayerError(
+                "YouTube could not play this video. Try opening it on YouTube.",
+              );
             },
 
             onAutoplayBlocked() {
-              if (!disposed) {
-                setAutoplayBlocked(true);
+              if (disposed) {
+                return;
               }
+
+              setAutoplayBlocked(true);
             },
           },
         });
       })
       .catch(() => {
-        if (!disposed) {
-          setPlayerError("Unable to load the YouTube player.");
+        if (disposed) {
+          return;
         }
+
+        setPlayerError("Unable to load the YouTube player.");
       });
 
     return () => {
@@ -359,16 +503,16 @@ const SharedYouTubePlayer = forwardRef<
 
       createdPlayer?.destroy();
     };
-  }, [videoId]);
+  }, [videoId, applyAuthoritativePlayback]);
 
   /*
-   * Apply explicit authoritative room changes:
+   * Apply explicit authoritative updates:
    *
-   * play
-   * pause
-   * seek
+   * - play
+   * - pause
+   * - seek
    *
-   * Small natural drift is ignored here.
+   * Small natural drift is ignored.
    */
   useEffect(() => {
     const player = playerRef.current;
@@ -378,10 +522,16 @@ const SharedYouTubePlayer = forwardRef<
     }
 
     applyAuthoritativePlayback(player);
-  }, [playback.status, playback.positionSeconds, playback.updatedAt, ready]);
+  }, [
+    playback.status,
+    playback.positionSeconds,
+    playback.updatedAt,
+    ready,
+    applyAuthoritativePlayback,
+  ]);
 
   /*
-   * Personal mute is deliberately independent of room playback.
+   * Personal mute never changes shared playback.
    */
   useEffect(() => {
     const player = playerRef.current;
@@ -398,11 +548,11 @@ const SharedYouTubePlayer = forwardRef<
   }, [muted, ready]);
 
   /*
-   * Lightweight drift correction.
+   * Every five seconds, compare the local player
+   * against the server timestamp.
    *
-   * We do not write anything to Redis and we do not emit any
-   * Socket.IO command. Each browser simply compares itself with
-   * the authoritative timestamp it already received.
+   * Correction only occurs when drift exceeds the
+   * configured tolerance.
    */
   useEffect(() => {
     if (!ready) {
@@ -417,8 +567,9 @@ const SharedYouTubePlayer = forwardRef<
       }
 
       /*
-       * Background tabs frequently throttle timers. We wait until
-       * visibility returns instead of trying to correct while hidden.
+       * Background tabs are often throttled.
+       * Visibility recovery below handles those
+       * rather than seeking while hidden.
        */
       if (document.visibilityState !== "visible") {
         return;
@@ -434,11 +585,12 @@ const SharedYouTubePlayer = forwardRef<
     return () => {
       window.clearInterval(timer);
     };
-  }, [ready]);
+  }, [ready, correctPosition]);
 
   /*
-   * Browsers may freeze or heavily throttle a background tab.
-   * Immediately resync when the participant returns to VIBE.
+   * Browsers may suspend or heavily throttle a
+   * background tab. Resynchronize immediately when
+   * the participant returns.
    */
   useEffect(() => {
     if (!ready) {
@@ -464,7 +616,7 @@ const SharedYouTubePlayer = forwardRef<
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [ready]);
+  }, [ready, applyAuthoritativePlayback]);
 
   return (
     <div>
@@ -499,13 +651,18 @@ const SharedYouTubePlayer = forwardRef<
               }
 
               /*
-               * Bring the browser to the current room position
-               * before enabling locally blocked playback.
+               * Bring this browser to the current
+               * room timestamp before allowing the
+               * user to start locally blocked audio.
                */
               correctPosition(player, true);
 
               player.playVideo();
 
+              /*
+               * This update happens in a user event,
+               * not inside an effect.
+               */
               setAutoplayBlocked(false);
             }}
             className="mt-2 rounded-md bg-amber-200 px-3 py-1.5 text-xs font-medium text-neutral-950"
