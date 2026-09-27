@@ -818,51 +818,73 @@ export default function SpatialRoom({
         )}
 
         {/* Music popover */}
-        {musicOpen && (
-          <>
+          {musicOpen && (
             <button
               type="button"
               aria-label="Close shared music"
               onClick={() => setMusicOpen(false)}
               className="absolute inset-0 z-30 bg-black/20"
             />
+          )}
 
-            <aside className="absolute bottom-3 left-3 right-3 top-16 z-40 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl sm:bottom-auto sm:right-auto sm:max-h-[min(34rem,calc(100%-5rem))] sm:w-[22rem]">
-              <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span aria-hidden="true" className="text-lg">
-                    🔊
-                  </span>
-
-                  <div>
-                    <p className="font-medium">Shared music</p>
-                    <p className="text-xs text-neutral-500">
-                      Room listening
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setMusicOpen(false)}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
-                  aria-label="Close shared music"
+          {/*
+          * Keep RoomMusic mounted even while the panel is closed.
+          *
+          * The YouTube player lives inside RoomMusic. Unmounting this
+          * component would destroy the iframe and stop local playback.
+          *
+          * Closing the popover should therefore only hide the UI.
+          * Shared playback continues until the track is paused/cleared
+          * or the user leaves the room.
+          */}
+          <aside
+            aria-hidden={!musicOpen}
+            inert={!musicOpen}
+            className={`absolute bottom-3 left-3 right-3 top-16 z-40 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl transition duration-200 sm:bottom-auto sm:right-auto sm:max-h-[min(34rem,calc(100%-5rem))] sm:w-[22rem] ${
+              musicOpen
+                ? "visible scale-100 opacity-100"
+                : "pointer-events-none invisible scale-[0.98] opacity-0"
+            }`}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden="true"
+                  className="text-lg"
                 >
-                  ×
-                </button>
+                  🔊
+                </span>
+
+                <div>
+                  <p className="font-medium">
+                    Shared music
+                  </p>
+
+                  <p className="text-xs text-neutral-500">
+                    Room listening
+                  </p>
+                </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
-                <RoomMusic
-                  roomId={roomId}
-                  isOwner={isOwner}
-                  canControl={Boolean(currentUserId)}
-                  compact
-                />
-              </div>
-            </aside>
-          </>
-        )}
+              <button
+                type="button"
+                onClick={() => setMusicOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+                aria-label="Close shared music"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
+              <RoomMusic
+                roomId={roomId}
+                isOwner={isOwner}
+                canControl={Boolean(currentUserId)}
+                compact
+              />
+            </div>
+          </aside>
       </div>
 
       <footer className="border-t border-neutral-800 px-6 py-4">
