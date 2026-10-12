@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RoomChat from "@/components/room-chat";
 
 import RoomDm from "@/components/room-dm";
+import Room3dScene from "@/components/room-3d-scene";
 
 import RoomMusic from "@/components/room-music";
 
@@ -58,6 +59,8 @@ interface ChatPrefill {
 
   requestId: number;
 }
+
+type RoomViewMode = "2D" | "3D";
 
 const BUBBLE_LIFETIME_MS = 5000;
 
@@ -125,6 +128,8 @@ export default function SpatialRoom({
   const [chatOpen, setChatOpen] = useState(false);
 
   const [musicOpen, setMusicOpen] = useState(false);
+
+  const [roomViewMode, setRoomViewMode] = useState<RoomViewMode>("3D");
 
   const [activeDmParticipant, setActiveDmParticipant] =
     useState<SpatialParticipant | null>(null);
@@ -561,7 +566,28 @@ export default function SpatialRoom({
           <h2 className="mt-1 text-xl font-semibold">People in this space</h2>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <div
+            className="flex rounded-lg border border-neutral-800 bg-neutral-950 p-1"
+            aria-label="Room view"
+          >
+            {(["2D", "3D"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setRoomViewMode(mode)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                  roomViewMode === mode
+                    ? "bg-neutral-100 text-neutral-950"
+                    : "text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+                }`}
+                aria-pressed={roomViewMode === mode}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
+
           <p className="text-sm text-neutral-500">
             {users.length}/{capacity}
           </p>
@@ -581,21 +607,34 @@ export default function SpatialRoom({
       </header>
 
       <div className="relative min-h-[520px] overflow-hidden bg-neutral-950 sm:min-h-[620px]">
-        {/* Room environment */}
+        {roomViewMode === "3D" && (
+          <Room3dScene
+            className="absolute inset-0"
+            assignments={assignments}
+            currentUserId={currentUserId}
+            onSeatClick={handleSeatClick}
+          />
+        )}
 
-        <div className="absolute inset-x-0 top-0 h-[36%] border-b border-neutral-800 bg-neutral-900/60" />
+        {roomViewMode === "2D" && (
+          <>
+            {/* Room environment */}
 
-        <div className="absolute left-1/2 top-[10%] -translate-x-1/2">
-          <div className="rounded-xl border border-neutral-700 bg-neutral-950 px-8 py-3 text-center shadow-lg">
-            <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">
-              VIBE
-            </p>
+            <div className="absolute inset-x-0 top-0 h-[36%] border-b border-neutral-800 bg-neutral-900/60" />
 
-            <p className="mt-1 text-sm text-neutral-400">shared space</p>
-          </div>
-        </div>
+            <div className="absolute left-1/2 top-[10%] -translate-x-1/2">
+              <div className="rounded-xl border border-neutral-700 bg-neutral-950 px-8 py-3 text-center shadow-lg">
+                <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">
+                  VIBE
+                </p>
 
-        <div className="absolute inset-x-[7%] bottom-[8%] top-[19%] rounded-[3rem] border border-neutral-800/70 bg-neutral-900/30" />
+                <p className="mt-1 text-sm text-neutral-400">shared space</p>
+              </div>
+            </div>
+
+            <div className="absolute inset-x-[7%] bottom-[8%] top-[19%] rounded-[3rem] border border-neutral-800/70 bg-neutral-900/30" />
+          </>
+        )}
 
         {/* Music */}
 
@@ -693,220 +732,229 @@ export default function SpatialRoom({
           </button>
         )}
 
-        {/* Empty seats */}
+        {roomViewMode === "2D" && (
+          <>
+            {/* Empty seats */}
 
-        {SPATIAL_SEATS.map((seat) => {
-          if (occupiedSeats.has(seat.id)) {
-            return null;
-          }
-
-          return (
-            <button
-              key={seat.id}
-              type="button"
-              disabled={!currentUserId}
-              onClick={() => handleSeatClick(seat.id)}
-              title={
-                currentUserId ? "Move here" : "Join the room to choose a seat"
+            {SPATIAL_SEATS.map((seat) => {
+              if (occupiedSeats.has(seat.id)) {
+                return null;
               }
-              className={`absolute h-14 w-20 -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-dashed transition ${
-                currentUserId
-                  ? "border-neutral-700 bg-neutral-900/40 hover:border-neutral-500 hover:bg-neutral-800/60"
-                  : "cursor-default border-neutral-800/50 bg-neutral-900/20"
-              }`}
-              style={{
-                left: `${seat.x}%`,
 
-                top: `${seat.y}%`,
-              }}
-            >
-              <span className="text-xs text-neutral-700">Seat</span>
-            </button>
-          );
-        })}
+              return (
+                <button
+                  key={seat.id}
+                  type="button"
+                  disabled={!currentUserId}
+                  onClick={() => handleSeatClick(seat.id)}
+                  title={
+                    currentUserId
+                      ? "Move here"
+                      : "Join the room to choose a seat"
+                  }
+                  className={`absolute h-14 w-20 -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-dashed transition ${
+                    currentUserId
+                      ? "border-neutral-700 bg-neutral-900/40 hover:border-neutral-500 hover:bg-neutral-800/60"
+                      : "cursor-default border-neutral-800/50 bg-neutral-900/20"
+                  }`}
+                  style={{
+                    left: `${seat.x}%`,
 
-        {/* Participants */}
+                    top: `${seat.y}%`,
+                  }}
+                >
+                  <span className="text-xs text-neutral-700">Seat</span>
+                </button>
+              );
+            })}
 
-        {renderedSeats.map(({ participant, position }) => {
-          const isCurrentUser = participant.userId === currentUserId;
+            {/* Participants */}
 
-          const bubble = activeBubbles[participant.userId];
+            {renderedSeats.map(({ participant, position }) => {
+              const isCurrentUser = participant.userId === currentUserId;
 
-          return (
-            <div
-              key={participant.userId}
-              className="absolute z-10 -translate-x-1/2 -translate-y-1/2 transition-[left,top] duration-500 ease-out"
-              style={{
-                left: `${position.x}%`,
+              const bubble = activeBubbles[participant.userId];
 
-                top: `${position.y}%`,
-              }}
-            >
-              <div className="group relative flex w-24 flex-col items-center sm:w-28">
-                {bubble && (
-                  <button
-                    type="button"
-                    onClick={openChat}
-                    className="absolute bottom-[calc(100%+0.65rem)] left-1/2 z-20 w-44 -translate-x-1/2 rounded-xl border border-neutral-700 bg-neutral-100 px-3 py-2 text-left text-xs leading-5 text-neutral-950 shadow-xl transition hover:bg-white"
-                    title="Open room chat"
-                  >
-                    <span className="line-clamp-3 break-words">
-                      {bubble.content}
-                    </span>
+              return (
+                <div
+                  key={participant.userId}
+                  className="absolute z-10 -translate-x-1/2 -translate-y-1/2 transition-[left,top] duration-500 ease-out"
+                  style={{
+                    left: `${position.x}%`,
 
-                    <span className="absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-neutral-700 bg-neutral-100" />
-                  </button>
-                )}
+                    top: `${position.y}%`,
+                  }}
+                >
+                  <div className="group relative flex w-24 flex-col items-center sm:w-28">
+                    {bubble && (
+                      <button
+                        type="button"
+                        onClick={openChat}
+                        className="absolute bottom-[calc(100%+0.65rem)] left-1/2 z-20 w-44 -translate-x-1/2 rounded-xl border border-neutral-700 bg-neutral-100 px-3 py-2 text-left text-xs leading-5 text-neutral-950 shadow-xl transition hover:bg-white"
+                        title="Open room chat"
+                      >
+                        <span className="line-clamp-3 break-words">
+                          {bubble.content}
+                        </span>
 
-                <div className="relative">
-                  <div className="absolute left-1/2 top-[82%] h-5 w-16 -translate-x-1/2 rounded-full bg-black/30 blur-md" />
+                        <span className="absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-neutral-700 bg-neutral-100" />
+                      </button>
+                    )}
 
-                  <div className="relative transition-transform duration-200 group-hover:-translate-y-1">
-                    <VibeAvatar avatarId={participant.avatarId} size="lg" />
-                  </div>
+                    <div className="relative">
+                      <div className="absolute left-1/2 top-[82%] h-5 w-16 -translate-x-1/2 rounded-full bg-black/30 blur-md" />
 
-                  <span className="absolute -right-1 bottom-1 h-3 w-3 rounded-full border-2 border-neutral-950 bg-green-400" />
-                </div>
-
-                <div className="relative mt-2 flex items-start gap-1">
-                  <div
-                    className={`min-w-0 max-w-full rounded-lg border px-3 py-1.5 text-center shadow-lg backdrop-blur ${
-                      isCurrentUser
-                        ? "border-neutral-500 bg-neutral-900"
-                        : "border-neutral-800 bg-neutral-950/90"
-                    }`}
-                  >
-                    <p className="truncate text-sm font-medium">
-                      {participant.displayName}
-                    </p>
-
-                    <p className="mt-0.5 text-[10px] uppercase tracking-wide text-neutral-600">
-                      {isCurrentUser
-                        ? "You"
-                        : participant.identityType === "GUEST"
-                          ? "Guest"
-                          : "Registered"}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    data-participant-menu-trigger
-                    onClick={() => toggleParticipantMenu(participant.userId)}
-                    className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/90 text-sm text-neutral-500 transition hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
-                    aria-label={`More options for ${participant.displayName}`}
-                    title={`More options for ${participant.displayName}`}
-                  >
-                    ⋯
-                    {!isCurrentUser &&
-                      (dmUnreadCounts[participant.userId] ?? 0) > 0 && (
-                        <span
-                          aria-hidden="true"
-                          className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-neutral-950 bg-red-500"
-                        />
-                      )}
-                  </button>
-
-                  {openParticipantId === participant.userId && (
-                    <div
-                      data-participant-menu
-                      className="absolute bottom-[calc(100%+0.5rem)] left-1/2 z-50 w-56 -translate-x-1/2 overflow-hidden rounded-xl border border-neutral-700 bg-neutral-950 text-left shadow-2xl"
-                    >
-                      <div className="border-b border-neutral-800 p-3">
-                        <div className="flex items-center gap-3">
-                          <VibeAvatar
-                            avatarId={participant.avatarId}
-                            size="sm"
-                          />
-
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-neutral-100">
-                              {participant.displayName}
-                            </p>
-
-                            <p className="mt-0.5 text-xs text-neutral-500">
-                              {isCurrentUser
-                                ? `You · ${
-                                    participant.identityType === "GUEST"
-                                      ? "Guest"
-                                      : "Registered"
-                                  }`
-                                : participant.identityType === "GUEST"
-                                  ? "Guest"
-                                  : "Registered"}
-                            </p>
-                          </div>
-                        </div>
+                      <div className="relative transition-transform duration-200 group-hover:-translate-y-1">
+                        <VibeAvatar avatarId={participant.avatarId} size="lg" />
                       </div>
 
-                      {isCurrentUser ? (
-                        <div className="p-3">
-                          <p className="text-xs leading-5 text-neutral-500">
-                            This is you. Click an empty seat to move.
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="p-2">
-                          <button
-                            type="button"
-                            onClick={() => mentionParticipant(participant)}
-                            disabled={!currentUserId}
-                            className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <span className="flex items-center gap-2">
-                              <span
-                                aria-hidden="true"
-                                className="font-semibold"
+                      <span className="absolute -right-1 bottom-1 h-3 w-3 rounded-full border-2 border-neutral-950 bg-green-400" />
+                    </div>
+
+                    <div className="relative mt-2 flex items-start gap-1">
+                      <div
+                        className={`min-w-0 max-w-full rounded-lg border px-3 py-1.5 text-center shadow-lg backdrop-blur ${
+                          isCurrentUser
+                            ? "border-neutral-500 bg-neutral-900"
+                            : "border-neutral-800 bg-neutral-950/90"
+                        }`}
+                      >
+                        <p className="truncate text-sm font-medium">
+                          {participant.displayName}
+                        </p>
+
+                        <p className="mt-0.5 text-[10px] uppercase tracking-wide text-neutral-600">
+                          {isCurrentUser
+                            ? "You"
+                            : participant.identityType === "GUEST"
+                              ? "Guest"
+                              : "Registered"}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        data-participant-menu-trigger
+                        onClick={() =>
+                          toggleParticipantMenu(participant.userId)
+                        }
+                        className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/90 text-sm text-neutral-500 transition hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+                        aria-label={`More options for ${participant.displayName}`}
+                        title={`More options for ${participant.displayName}`}
+                      >
+                        ⋯
+                        {!isCurrentUser &&
+                          (dmUnreadCounts[participant.userId] ?? 0) > 0 && (
+                            <span
+                              aria-hidden="true"
+                              className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-neutral-950 bg-red-500"
+                            />
+                          )}
+                      </button>
+
+                      {openParticipantId === participant.userId && (
+                        <div
+                          data-participant-menu
+                          className="absolute bottom-[calc(100%+0.5rem)] left-1/2 z-50 w-56 -translate-x-1/2 overflow-hidden rounded-xl border border-neutral-700 bg-neutral-950 text-left shadow-2xl"
+                        >
+                          <div className="border-b border-neutral-800 p-3">
+                            <div className="flex items-center gap-3">
+                              <VibeAvatar
+                                avatarId={participant.avatarId}
+                                size="sm"
+                              />
+
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-neutral-100">
+                                  {participant.displayName}
+                                </p>
+
+                                <p className="mt-0.5 text-xs text-neutral-500">
+                                  {isCurrentUser
+                                    ? `You · ${
+                                        participant.identityType === "GUEST"
+                                          ? "Guest"
+                                          : "Registered"
+                                      }`
+                                    : participant.identityType === "GUEST"
+                                      ? "Guest"
+                                      : "Registered"}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {isCurrentUser ? (
+                            <div className="p-3">
+                              <p className="text-xs leading-5 text-neutral-500">
+                                This is you. Click an empty seat to move.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="p-2">
+                              <button
+                                type="button"
+                                onClick={() => mentionParticipant(participant)}
+                                disabled={!currentUserId}
+                                className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
                               >
-                                @
-                              </span>
-                              Mention
-                            </span>
+                                <span className="flex items-center gap-2">
+                                  <span
+                                    aria-hidden="true"
+                                    className="font-semibold"
+                                  >
+                                    @
+                                  </span>
+                                  Mention
+                                </span>
 
-                            <span className="text-xs text-neutral-600">
-                              Room
-                            </span>
-                          </button>
+                                <span className="text-xs text-neutral-600">
+                                  Room
+                                </span>
+                              </button>
 
-                          <button
-                            type="button"
-                            onClick={() => openDm(participant)}
-                            disabled={!currentUserId}
-                            className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <span className="flex items-center gap-2">
-                              <span aria-hidden="true">💬</span>
-                              Message
-                            </span>
+                              <button
+                                type="button"
+                                onClick={() => openDm(participant)}
+                                disabled={!currentUserId}
+                                className="mt-1 flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span aria-hidden="true">💬</span>
+                                  Message
+                                </span>
 
-                            {(dmUnreadCounts[participant.userId] ?? 0) > 0 && (
-                              <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold text-neutral-950">
-                                {dmUnreadCounts[participant.userId]}
-                              </span>
-                            )}
-                          </button>
+                                {(dmUnreadCounts[participant.userId] ?? 0) >
+                                  0 && (
+                                  <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold text-neutral-950">
+                                    {dmUnreadCounts[participant.userId]}
+                                  </span>
+                                )}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {users.length === 0 && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center">
+                <div>
+                  <p className="font-medium text-neutral-300">
+                    This room is quiet.
+                  </p>
+
+                  <p className="mt-1 text-sm text-neutral-600">
+                    Join the room to take a seat.
+                  </p>
                 </div>
               </div>
-            </div>
-          );
-        })}
-
-        {users.length === 0 && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center">
-            <div>
-              <p className="font-medium text-neutral-300">
-                This room is quiet.
-              </p>
-
-              <p className="mt-1 text-sm text-neutral-600">
-                Join the room to take a seat.
-              </p>
-            </div>
-          </div>
+            )}
+          </>
         )}
 
         {/* Chat drawer */}
