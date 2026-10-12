@@ -9,12 +9,13 @@
 ![Redis](https://img.shields.io/badge/Redis-Realtime_State-DC382D?style=flat&logo=redis&logoColor=white)
 ![Socket.IO](https://img.shields.io/badge/Socket.IO-Realtime-010101?style=flat&logo=socketdotio&logoColor=white)
 ![Prisma](https://img.shields.io/badge/Prisma-ORM-2D3748?style=flat&logo=prisma&logoColor=white)
+![Three.js](https://img.shields.io/badge/Three.js-3D_Room-000000?style=flat&logo=threedotjs&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat&logo=docker&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Active_Development-yellow?style=flat)
 
-> Open a room, take a seat, see who is actually there, chat in real time, mention people around you, and share music without being forced to create an account.
+> Open a room, take a seat, see who is actually there, chat in real time, mention or message people around you, and listen to synchronized shared music without being forced to create an account.
 
-VIBE combines persistent registered identities with temporary guest sessions. Durable room ownership and membership live in PostgreSQL, while high-frequency presence, chat, and music state live in Redis.
+VIBE combines persistent registered identities with temporary guest sessions. Durable room ownership and membership live in PostgreSQL, while high-frequency presence, seat, chat, DM, and music state live in Redis.
 
 ---
 
@@ -22,9 +23,9 @@ VIBE combines persistent registered identities with temporary guest sessions. Du
 
 VIBE is a realtime social-room platform built around the idea of a lightweight **virtual third place**: a space where people can study, listen to music, chat, and spend time together without the overhead of a traditional meeting application.
 
-The project is intentionally built as a modular monolith first. REST handles durable application operations, Socket.IO handles realtime interaction, PostgreSQL stores persistent relational state, and Redis stores fast-changing room state.
+The project is intentionally built as a modular monolith first. REST handles durable application operations, Socket.IO handles realtime interaction, PostgreSQL stores persistent relational state, Redis stores fast-changing room state, and React Three Fiber renders the optional 3D room experience.
 
-> **PostgreSQL remembers who owns and belongs to a room. Redis remembers who is actually there right now.**
+> **PostgreSQL remembers who owns and belongs to a room. Redis remembers who is actually there, where they are sitting, what they are saying, and what the room is listening to right now.**
 
 ### What VIBE currently does
 
@@ -40,28 +41,33 @@ The project is intentionally built as a modular monolith first. REST handles dur
 - Refresh-safe presence deduplication
 - Guest active-room restoration within the browser session
 - Atomic 12-person active-room capacity enforcement
-- Fixed 12-seat spatial room layout
-- Stable participant seat assignments during presence changes
-- Browser-session seat persistence
+- Shared server-authoritative 12-seat room state
 - Click-to-move between empty seats
+- Synchronized seat changes across browsers
+- 2D and 3D room modes using the same logical seat IDs
+- Low-poly 3D participant avatars
 - Realtime Redis-backed room chat
-- Temporary speech bubbles above participant avatars
+- Temporary speech bubbles above participant avatars in both 2D and 3D
 - Compact in-room chat drawer
 - Unread room-message indicator
 - `@` mention autocomplete and highlighting
 - Personal mention notifications
 - Participant interaction menus
 - One-click participant mention action
-- Redis-backed shared room music state
-- Compact in-room music popover
+- Ephemeral private DMs between active room participants
+- Per-conversation unread DM tracking
+- Redis-backed shared YouTube music state
+- Embedded YouTube playback
+- Shared play / pause / seek synchronization
+- Reconnect and drift correction for playback
+- Personal mute without changing shared playback state
 - Owner / participant music-control permissions
-- Realtime occupancy, chat, music, and presence updates through Socket.IO
+- Realtime occupancy, seat, chat, DM, music, and presence updates through Socket.IO
 
 ### Planned next
 
-- Embedded shared music playback
-- Shared play / pause / seek synchronization
-- Ephemeral private DMs
+- Final 3D polish and WebGL fallback handling
+- Mobile/responsive 3D tuning
 - Additional room visual themes and layouts
 - Improved room discovery
 - Observability and automated testing
@@ -86,9 +92,11 @@ Browse or create rooms
   ↓
 Persistent ownership / membership
   ↓
-Join spatial room
+Join room
   ↓
-Seat + chat + mentions + music + participant interactions
+2D or 3D shared space
+  ↓
+Seat + chat + mentions + DMs + synchronized music
 ```
 
 Registered users are persisted in PostgreSQL. Google provides authentication, while VIBE owns the public display identity shown inside the product.
@@ -110,7 +118,9 @@ Browse rooms
   ↓
 Join active room
   ↓
-Seat + chat + mentions + music + participant interactions
+2D or 3D shared space
+  ↓
+Seat + chat + mentions + DMs + synchronized music
 ```
 
 Guests do not require Google sign-in and do not receive persistent Prisma membership rows. Their identity and active-room state remain temporary.
@@ -121,7 +131,7 @@ Guest identity and active-room state survive page refreshes within the same brow
 
 A stable `presenceId` is stored in session storage so a refresh can replace the previous socket connection instead of counting the same participant twice.
 
-Spatial seat assignments are also stored in session storage so the local room layout remains stable across refreshes.
+Seat assignment itself is no longer browser-local. The authoritative `seatId` is stored with the participant's Redis presence record and is redistributed through `presence:update`, so all clients render the same room layout.
 
 ---
 
@@ -181,37 +191,83 @@ Guest identities are intentionally temporary and are not persisted as registered
 
 ---
 
-## 2D Spatial Room
+## Spatial Room
 
-The room itself is now the main realtime interaction surface.
+The room is the main realtime interaction surface and can be rendered in either 2D or 3D.
+
+### Shared logical seat model
+
+VIBE defines 12 logical seat IDs:
 
 ```text
-┌──────────────────────────────────────────────┐
-│ 🔊                                      💬  │
-│                                              │
-│                    VIBE                      │
-│                                              │
-│          🐸 Kratos       🐱 Chaos            │
-│             ⋯               ⋯                │
-│                                              │
-│       empty seat      empty seat             │
-└──────────────────────────────────────────────┘
+seat-1 ... seat-12
 ```
+
+The 2D and 3D renderers use different coordinates, but they consume the same logical seat assignment.
+
+```text
+Redis PresenceUser.seatId
+          ↓
+    presence:update
+          ↓
+      SpatialRoom
+       ↙      ↘
+  2D layout   3D layout
+```
+
+This keeps room state synchronized even if one user is viewing 2D and another is viewing 3D.
 
 ### Current spatial behavior
 
 - Maximum of 12 active participants
-- Fixed 12-seat coordinate system
-- Central seats are assigned first
-- Existing occupants keep their seats as others enter or leave
-- New arrivals receive the next available seat deterministically
-- The current participant can click an empty seat to move
-- Occupied seats cannot be taken
-- Seat assignments persist in browser session storage
-- Presence remains authoritative on the backend
-- Visual seat placement remains a frontend concern
+- Fixed 12-seat logical room model
+- Initial seat allocation is server-authoritative
+- Existing users keep their seat across socket replacement when possible
+- Participants can click empty seats to move
+- Occupied seats cannot be claimed by another participant
+- Seat movement is validated atomically in Redis
+- Seat changes broadcast through normal `presence:update`
+- All connected browsers see the same participant-seat mapping
+- 2D and 3D share the same logical seat IDs
+- Presence and seat ownership remain ephemeral and are released when presence expires
 
-The current seat selection is intentionally browser-local. It is not yet synchronized as shared authoritative state across every client.
+### 2D room
+
+The 2D room remains the lightweight fallback/reference renderer.
+
+It supports:
+
+- participant avatars
+- empty-seat interaction
+- speech bubbles
+- participant menus
+- mention and DM actions
+- music/chat overlays
+- unread indicators
+
+### 3D room
+
+The 3D room is built with Three.js through React Three Fiber and Drei.
+
+Current 3D behavior includes:
+
+- fixed room environment
+- 12 physical chairs
+- low-poly participant avatars
+- avatar-specific color styling
+- subtle idle animation
+- current-user labels
+- online indicators
+- selected-participant ring
+- unread-DM indicator
+- click-to-select participant interaction
+- shared seat movement
+- participant action card
+- 3D speech bubbles
+- click bubble to open room chat
+- 2D / 3D mode toggle
+
+The 3D layer intentionally reuses existing room state instead of creating a separate backend model.
 
 ---
 
@@ -232,9 +288,9 @@ alien
 bear
 ```
 
-Avatar IDs are carried through VIBE identity, presence, chat, and profile state.
+Avatar IDs are carried through VIBE identity, presence, chat, DM, and profile state.
 
-This means the visual representation can later move from the current renderer to custom SVG or richer avatar assets without changing the identity contract.
+The 2D renderer uses the VIBE avatar component, while the 3D renderer maps the same avatar ID to a low-poly color/style configuration.
 
 ---
 
@@ -265,6 +321,8 @@ Atomic Redis capacity check
    ↓
 Presence entry created
    ↓
+Server assigns / restores seatId
+   ↓
 presence:update broadcast
 ```
 
@@ -275,16 +333,20 @@ presence:update broadcast
 | `room:watch` | Subscribe to room updates without entering active presence |
 | `presence:enter` | Become an active room participant |
 | `presence:leave` | Leave active room presence |
-| `presence:update` | Broadcast current room occupants |
+| `presence:update` | Broadcast current occupants and their shared seat state |
 | `presence:heartbeat` | Refresh active presence ownership/liveness |
+| `presence:seat` | Atomically move the current participant to an empty seat |
 | `chat:history` | Load temporary room chat history |
 | `chat:send` | Send a message as an active participant |
 | `chat:message` | Broadcast a new room message |
+| `dm:send` | Send an ephemeral direct message to another active participant |
+| `dm:message` | Deliver a direct message only to sender and recipient |
 | `music:get` | Load current room music state |
-| `music:set` | Share or update a track |
-| `music:clear` | Clear the current track |
-| `music:permission` | Change the room music-control policy |
-| `music:update` | Broadcast the current music state |
+| `music:set` | Set / replace the shared YouTube track |
+| `music:clear` | Clear the current shared track |
+| `music:permission` | Change room music-control policy |
+| `music:playback` | Apply shared play / pause / seek updates |
+| `music:update` | Broadcast authoritative shared music state |
 
 ---
 
@@ -305,11 +367,13 @@ The admission check uses an atomic Redis operation:
 ```text
 presence:enter
    ↓
-Does presenceId already exist?
-   ├── Yes → refresh/update socket safely
+Deduplicate logical user
+   ↓
+Does active presence already exist?
+   ├── Yes → replace socket ownership safely
    └── No
         ↓
-      HLEN < 12?
+       HLEN < 12?
         ├── Yes → add participant
         └── No  → reject "Room is full"
 ```
@@ -318,9 +382,9 @@ This prevents concurrent join requests from bypassing the room limit.
 
 ---
 
-## Presence Refresh Deduplication
+## Presence and Shared Seat State
 
-Presence is keyed by a stable browser-session `presenceId`, not directly by Socket.IO `socketId`.
+Presence is keyed by a stable browser-session `presenceId`, while logical-user deduplication also prevents duplicate active identities during reconnects.
 
 Redis stores room presence in a structure conceptually similar to:
 
@@ -335,20 +399,45 @@ presenceId -> {
   identityType,
   avatarId?,
   email?,
+  seatId?,
   lastSeenAt
 }
 ```
 
-On refresh:
+On refresh or socket replacement:
 
 1. the browser keeps the same `presenceId`
 2. Socket.IO creates a new socket
-3. Redis replaces the stored socket ID
-4. the old socket eventually disconnects
-5. the server checks socket ownership before removing presence
-6. the replacement connection remains active
+3. the server deduplicates the same logical user
+4. the existing seat is preserved when valid
+5. Redis replaces socket ownership
+6. the old socket eventually disconnects
+7. the server verifies socket ownership before removal
+8. the replacement connection remains active
 
 The application also uses presence heartbeats and stale-entry cleanup so abandoned socket state does not remain indefinitely.
+
+### Atomic seat movement
+
+Seat movement uses a Redis Lua operation.
+
+```text
+presence:seat
+   ↓
+Validate caller owns active presence
+   ↓
+Validate seat ID
+   ↓
+Check every other presence record
+   ↓
+Seat free?
+ ├── No  → reject
+ └── Yes → write participant.seatId
+                ↓
+        broadcast presence:update
+```
+
+Two concurrent clients therefore cannot successfully claim the same seat.
 
 ---
 
@@ -365,7 +454,10 @@ Room chat is realtime and intentionally temporary.
 - Chat TTL: 24 hours
 - Guests and registered users can participate
 - Messages include display identity and avatar metadata
-- New messages can appear temporarily above the sender's spatial avatar
+- New messages temporarily appear above the sender in 2D and 3D
+- Speech bubbles use the same ambient `chat:message` listener
+- Bubbles expire after roughly five seconds
+- Clicking a speech bubble opens room chat
 - Unread messages show an indicator on the room chat control
 - The chat drawer is embedded directly into the spatial room
 
@@ -394,7 +486,7 @@ Typing `@` opens autocomplete for active room participants.
    ↓
 Chaos
    ↓
-@Chaos 
+@Chaos
 ```
 
 Current mention behavior includes:
@@ -405,15 +497,53 @@ Current mention behavior includes:
 - stronger highlighting when the current user is mentioned
 - unread mention counter
 - temporary in-room mention notification
-- clicking a participant's menu can open chat with `@DisplayName` prefilled
+- one-click participant mention action
+- participant action can open chat with `@DisplayName` prefilled
 
 Mention resolution is currently display-name based. Structured mention metadata can be added later if the product needs stronger identity guarantees.
 
 ---
 
-## Participant Interaction Menu
+## Ephemeral Direct Messages
 
-Each participant has a compact `⋯` interaction menu.
+Private DMs are implemented as ephemeral realtime messages between active room participants.
+
+### Current behavior
+
+- sender must be an active participant
+- recipient must still be actively present
+- sender cannot DM themselves
+- content is validated server-side
+- DMs are delivered only to the sender and recipient sockets
+- DMs are not broadcast to the room
+- frontend keeps temporary per-conversation history in memory
+- latest 50 messages are retained per local conversation
+- unread counts are tracked per participant
+- opening a conversation clears its unread count
+- leaving/reloading removes local DM history
+- no PostgreSQL DM persistence is created
+
+```text
+dm:send
+   ↓
+Validate sender presence
+   ↓
+Resolve recipient from Redis presence
+   ↓
+Resolve recipient socket
+   ↓
+Emit dm:message only to:
+  - sender
+  - recipient
+```
+
+This keeps private conversation state intentionally temporary.
+
+---
+
+## Participant Interaction
+
+Participant interaction is available in both 2D and 3D.
 
 For another participant:
 
@@ -422,76 +552,78 @@ For another participant:
 │ 🐱 Chaos             │
 │ Guest                │
 ├──────────────────────┤
-│ @  Mention      Room │
-│ 💬 Message      Soon │
+│ @ Mention            │
+│ 💬 Message           │
 └──────────────────────┘
 ```
 
-The current menu supports:
+Current interactions include:
 
 - participant identity summary
 - guest / registered status
 - one-click room mention
-- a reserved private-message entry point
+- one-click ephemeral DM
+- unread DM indicator
+- current-user self state
+- shared behavior across 2D and 3D
 
-Private messaging is intentionally not implemented yet. The disabled Message action preserves a natural UI location for the later ephemeral-DM system.
-
-The current user's own menu provides identity context and reminds them that empty seats can be selected directly.
+In 3D, clicking an avatar selects the participant and opens the existing HTML interaction UI rather than embedding complex application controls inside WebGL.
 
 ---
 
 ## Shared Music
 
-VIBE currently supports shared room music **metadata and links**, not audio rebroadcasting.
+VIBE supports synchronized shared YouTube playback.
 
-```ts
-interface RoomMusicState {
-  roomId: string;
+### Shared state
 
-  permission:
-    | "OWNER_ONLY"
-    | "ANY_MEMBER";
+The room maintains authoritative shared music state in Redis, including:
 
-  track: {
-    url: string;
-    title?: string;
-    provider?: string;
-    sharedBy: string;
-  } | null;
+- current track
+- playback status
+- playback position
+- revision/version ordering
+- update timestamp
+- room-control permission
 
-  updatedAt: string;
-}
-```
+The browser embeds YouTube for playback; VIBE does not rebroadcast or host copyrighted audio.
 
-The state is stored in Redis and broadcast through Socket.IO.
+### Current behavior
 
-### Current music UI
-
-The previous standalone music card has been replaced by an in-room speaker control.
+- validate and embed YouTube links
+- set / clear shared track
+- shared play
+- shared pause
+- shared seek
+- reconnect synchronization
+- drift correction
+- authoritative revision ordering on the client
+- personal mute
+- owner-only or any-member control modes
+- persistent music component mount while the popover is hidden
+- realtime `music:update` broadcasts
 
 ```text
-🔊
- ↓
-Shared music popover
- ↓
-Current track
-Shared by
-Open track
-Share / Clear
-Permission control
+User changes playback
+       ↓
+music:playback
+       ↓
+Server validates presence + permission
+       ↓
+Redis playback mutation
+       ↓
+music:update
+       ↓
+All clients reconcile shared player state
 ```
 
-Only one major room interaction surface is intended to be open at once: opening music closes chat, and opening chat closes music.
+### Reliability behavior
 
-### Planned playback stage
+Playback mutations use authoritative server state so reconnecting participants can recover the current room position.
 
-- YouTube embed playback
-- shared play / pause
-- seek synchronization
-- playback timestamps
-- later Spotify embed support where supported
+The frontend also applies drift correction instead of continuously forcing player position, avoiding unnecessary seeks during normal playback.
 
-VIBE will not rebroadcast or host copyrighted audio.
+Personal mute affects only the local player and does not alter shared playback for the rest of the room.
 
 ---
 
@@ -508,9 +640,10 @@ VIBE will not rebroadcast or host copyrighted audio.
 | Guest identity | Browser session + JWT | Temporary identity |
 | Guest avatar selection | Browser session + JWT | Temporary profile state |
 | Active room presence | Redis | High-frequency ephemeral state |
+| Shared seat assignment | Redis presence | Shared ephemeral spatial state |
 | Chat history | Redis | Temporary realtime history |
+| DM history | Client memory only | Intentionally ephemeral private state |
 | Music state | Redis | Shared volatile room state |
-| Local seat preference | Browser session | Prototype visual placement |
 | Socket fan-out | Socket.IO + Redis adapter | Realtime synchronization |
 
 ---
@@ -519,8 +652,9 @@ VIBE will not rebroadcast or host copyrighted audio.
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 16, React, TypeScript |
-| Styling | Tailwind CSS |
+| Frontend | Next.js 16, React 19, TypeScript |
+| Styling | Tailwind CSS 4 |
+| 3D rendering | Three.js, React Three Fiber, Drei |
 | Authentication | Auth.js / Google OAuth + VIBE JWT |
 | Backend | NestJS 11 |
 | HTTP adapter | Express |
@@ -539,7 +673,7 @@ VIBE will not rebroadcast or host copyrighted audio.
 ## 🏗️ Key Technical Decisions
 
 **Why PostgreSQL and Redis together?**  
-Room ownership, registered users, profiles, and memberships are durable relational data. Presence, chat, and current music state change frequently and do not need the same durability model.
+Room ownership, registered users, profiles, and memberships are durable relational data. Presence, seats, chat, and music change frequently and use a separate realtime state model.
 
 **Why Socket.IO instead of raw WebSockets?**  
 VIBE needs rooms, reconnection handling, acknowledgements, and Redis-backed fan-out. Socket.IO provides those primitives without rebuilding them manually.
@@ -550,11 +684,11 @@ The persistent API surface is predictable and relatively small. REST handles CRU
 **Why a modular monolith first?**  
 The current system does not need independent microservice deployment or Kafka. A modular NestJS backend keeps the architecture simpler while preserving service boundaries.
 
-**Why Redis for capacity?**  
-The product limit applies to people actively occupying a room, not people who have historically joined it.
+**Why Redis for capacity and presence?**  
+The product limit applies to people actively occupying a room, not people who have historically joined it. Redis fits the high-frequency, ephemeral ownership model.
 
-**Why an atomic capacity check?**  
-A separate count-then-insert sequence could admit too many participants during simultaneous joins.
+**Why atomic capacity and seat mutations?**  
+A separate read-then-write sequence could admit too many users or allow two participants to claim the same seat during concurrent requests.
 
 **Why are guests not Prisma users?**  
 Guest identities are intentionally temporary. Creating permanent rows for anonymous visitors would blur the distinction between durable accounts and ephemeral participation.
@@ -565,8 +699,14 @@ A viewer should be able to inspect a room without taking one of the active parti
 **Why keep Google identity separate from VIBE identity?**  
 Authentication identity and public product identity serve different purposes. Users should control the display name and avatar other participants see.
 
-**Why is seat placement frontend-owned right now?**  
-Presence is shared application state and must be authoritative. Seat placement is currently a presentation concern, so keeping it frontend-local avoids adding synchronization complexity before the product requires shared authoritative seats.
+**Why are seats server-authoritative now?**  
+Once the product supports multiple renderers and multiple browsers viewing the same room, seat placement becomes shared application state rather than a local presentation concern. Redis presence now owns `seatId`, and both 2D and 3D consume the same value.
+
+**Why build 3D as a rendering layer instead of a separate room system?**  
+Chat, presence, DMs, seats, music, and identity already define the room model. The 3D scene reuses those contracts and only changes presentation, which avoids duplicate backend state and keeps 2D/3D behavior consistent.
+
+**Why keep complex controls in HTML instead of WebGL?**  
+Chat drawers, DM panels, music controls, and participant action menus benefit from normal DOM accessibility and layout. The Three.js layer focuses on spatial representation and lightweight interactions.
 
 ---
 
@@ -670,6 +810,13 @@ Frontend:
 http://localhost:3000
 ```
 
+### Production builds
+
+```bash
+pnpm --filter server build
+pnpm --filter web build
+```
+
 ---
 
 ## 🔌 API Overview
@@ -678,7 +825,7 @@ http://localhost:3000
 
 ```text
 POST  /auth/guest
-POST  /auth/registered   # internal Next.js server exchange
+POST  /auth/registered
 GET   /auth/me
 PATCH /auth/profile
 PATCH /auth/avatar
@@ -727,9 +874,11 @@ VIBE/
 │   │   │   ├── owner-room-actions.tsx
 │   │   │   ├── room-actions.tsx
 │   │   │   ├── room-chat.tsx
+│   │   │   ├── room-dm.tsx
 │   │   │   ├── room-music.tsx
 │   │   │   ├── room-occupancy.tsx
 │   │   │   ├── room-presence.tsx
+│   │   │   ├── room-3d-scene.tsx
 │   │   │   ├── spatial-room.tsx
 │   │   │   ├── vibe-avatar.tsx
 │   │   │   └── vibe-profile-setup.tsx
@@ -741,7 +890,8 @@ VIBE/
 │   │   │   │   ├── socket.ts
 │   │   │   │   └── spatial-layout.ts
 │   │   │   └── types/
-│   │   │       └── chat.ts
+│   │   │       ├── chat.ts
+│   │   │       └── dm.ts
 │   │   └── auth.ts
 │   │
 │   └── server/
@@ -804,8 +954,9 @@ VIBE/
 - [x] Avatar rendering in chat
 - [x] Avatar rendering in membership UI
 - [x] Avatar rendering in participant interactions
+- [x] Low-poly 3D avatar renderer
 
-### Presence and capacity
+### Presence, capacity, and shared seats
 
 - [x] Redis-backed live presence
 - [x] Watch-room vs enter-room semantics
@@ -814,19 +965,40 @@ VIBE/
 - [x] Presence heartbeat
 - [x] Stale-presence cleanup
 - [x] Atomic 12-person active-room capacity
+- [x] Server-authoritative seat assignment
+- [x] Atomic seat movement
+- [x] Same-user seat preservation across reconnects
+- [x] Cross-browser seat synchronization
 
 ### 2D spatial room
 
 - [x] Spatial room canvas
 - [x] Fixed 12-seat layout
 - [x] Participant avatars
-- [x] Deterministic seat assignment
-- [x] Stable seats while occupancy changes
-- [x] Browser-session seat persistence
+- [x] Shared seat state
 - [x] User-selectable empty seats
 - [x] Occupied-seat protection
 - [x] Current-user visual distinction
 - [x] Participant online indicators
+- [x] Speech bubbles
+- [x] Participant interaction menus
+
+### 3D spatial room
+
+- [x] Three.js / React Three Fiber integration
+- [x] 2D / 3D room toggle
+- [x] Fixed 12-seat 3D layout
+- [x] Physical 3D chairs
+- [x] Low-poly participant avatars
+- [x] Shared server-authoritative seat rendering
+- [x] Click-to-move 3D seating
+- [x] Clickable 3D participants
+- [x] Selected-participant visual state
+- [x] 3D participant action card
+- [x] 3D unread DM indicator
+- [x] 3D chat speech bubbles
+- [x] Click bubble to open chat
+- [ ] Final responsive/WebGL/performance polish
 
 ### Chat and room interaction
 
@@ -834,15 +1006,27 @@ VIBE/
 - [x] Temporary 24-hour chat history
 - [x] Latest-50-message retention
 - [x] Compact in-room chat drawer
-- [x] Avatar speech bubbles
+- [x] 2D avatar speech bubbles
+- [x] 3D avatar speech bubbles
 - [x] Unread chat indicator
 - [x] `@` mention autocomplete
 - [x] Mention highlighting
 - [x] Mention counter
 - [x] In-room mention notifications
-- [x] Participant `⋯` interaction menu
+- [x] Participant interaction menu
 - [x] One-click participant mention action
-- [x] Reserved private-message UI entry point
+
+### Ephemeral DMs
+
+- [x] Active-participant DM validation
+- [x] Recipient lookup through presence
+- [x] Sender/recipient-only delivery
+- [x] Temporary per-conversation frontend state
+- [x] Per-conversation unread counts
+- [x] Participant Message action
+- [x] 2D DM entry point
+- [x] 3D DM entry point
+- [x] No persistent DM storage
 
 ### Shared music
 
@@ -850,17 +1034,22 @@ VIBE/
 - [x] Owner/participant music permissions
 - [x] Compact in-room music popover
 - [x] Realtime music-state updates
-- [x] Track URL/title sharing
+- [x] YouTube URL validation
+- [x] Embedded YouTube playback
+- [x] Shared play synchronization
+- [x] Shared pause synchronization
+- [x] Shared seek synchronization
+- [x] Playback revision ordering
+- [x] Reconnect synchronization
+- [x] Drift correction
+- [x] Personal mute
+- [x] Persistent player mount while UI is hidden
 - [x] Clear current track
 
-### Planned product work
+### Remaining product work
 
-- [ ] Embedded shared YouTube playback
-- [ ] Shared play/pause synchronization
-- [ ] Seek synchronization
-- [ ] Ephemeral private DMs
-- [ ] Redis-backed DM inactivity TTL
-- [ ] Guest-compatible temporary conversations
+- [ ] Final 3D responsive/mobile polish
+- [ ] WebGL fallback/error handling
 - [ ] Additional spatial layouts/themes
 - [ ] Improved room discovery
 - [ ] Live occupancy on homepage cards
@@ -873,6 +1062,7 @@ VIBE/
 - [ ] Playwright or Cypress E2E coverage
 - [ ] Capacity race-condition tests
 - [ ] Presence refresh/reconnect tests
+- [ ] Seat contention/concurrency tests
 - [ ] Guest/registered auth tests
 - [ ] Structured logging
 - [ ] Prometheus metrics
@@ -897,6 +1087,10 @@ VIBE/
 - Guest identities remain temporary
 - Room capacity is enforced server-side
 - Presence ownership is tied to socket state
+- Seat movement is authorized through active presence/socket ownership
+- DM sender and recipient are resolved server-side
+- DMs are delivered only to involved sockets
+- Music mutations validate active presence and room permissions
 - CORS is restricted to the frontend development origin
 
 ### Still required before production
@@ -929,7 +1123,9 @@ Persistent room membership
       ≠
 Live room presence
       ≠
-Visual seat placement
+Shared seat state
+      ≠
+Rendering mode
 ```
 
 A Google account proves who a registered user is.
@@ -940,7 +1136,9 @@ PostgreSQL membership records who durably belongs to a room.
 
 Redis presence determines whether that person is occupying the room right now.
 
-The frontend currently determines where that active participant appears inside the 2D room.
+Redis presence also carries the participant's current logical `seatId`, making spatial position shared application state.
+
+The 2D and 3D renderers interpret that same logical room state differently without creating separate backends.
 
 That separation keeps durable data, realtime state, and visual presentation from becoming unnecessarily coupled.
 
@@ -952,4 +1150,4 @@ MIT
 
 ---
 
-> Built as a realtime social-room platform combining persistent PostgreSQL ownership, temporary guest and registered JWT identities, Redis-backed presence/chat/music state, atomic capacity enforcement, Socket.IO synchronization, preset avatars, stable spatial seating, realtime mentions, participant interactions, and an integrated 2D room experience in a Next.js + NestJS monorepo.
+> Built as a realtime social-room platform combining persistent PostgreSQL ownership, temporary guest and registered JWT identities, Redis-backed presence/chat/seat/music state, atomic capacity and seat enforcement, Socket.IO synchronization, ephemeral private DMs, synchronized YouTube playback, preset avatars, shared 2D/3D spatial seating, realtime mentions, participant interactions, and low-poly 3D rooms in a Next.js + NestJS monorepo.
