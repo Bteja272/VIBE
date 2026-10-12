@@ -13,7 +13,6 @@ import VibeAvatar from "@/components/vibe-avatar";
 
 import {
   buildSpatialSeats,
-  reconcileSeatAssignments,
   SPATIAL_SEATS,
   type SpatialParticipant,
 } from "@/src/lib/spatial-layout";
@@ -70,10 +69,6 @@ const BUBBLE_MAX_LENGTH = 70;
 
 const MENTION_PREVIEW_MAX_LENGTH = 90;
 
-function getStorageKey(roomId: string) {
-  return `vibe_spatial_seats_${roomId}`;
-}
-
 function truncateText(content: string, maxLength: number) {
   const trimmed = content.trim();
 
@@ -121,10 +116,6 @@ export default function SpatialRoom({
 
   capacity = 12,
 }: SpatialRoomProps) {
-  const [assignments, setAssignments] = useState<Record<string, string>>({});
-
-  const [seatStateLoaded, setSeatStateLoaded] = useState(false);
-
   const [chatOpen, setChatOpen] = useState(false);
 
   const [musicOpen, setMusicOpen] = useState(false);
@@ -169,6 +160,16 @@ export default function SpatialRoom({
     [users, currentUserId],
   );
 
+  const assignments = useMemo(
+    () =>
+      Object.fromEntries(
+        users
+          .filter((user) => Boolean(user.seatId))
+          .map((user) => [user.userId, user.seatId as string]),
+      ),
+    [users],
+  );
+
   const occupiedSeats = useMemo(
     () => new Set(Object.values(assignments)),
 
@@ -180,40 +181,6 @@ export default function SpatialRoom({
 
     [users, assignments],
   );
-
-  useEffect(() => {
-    try {
-      const stored = window.sessionStorage.getItem(getStorageKey(roomId));
-
-      if (stored) {
-        setAssignments(JSON.parse(stored) as Record<string, string>);
-      }
-    } catch {
-      // Invalid local seat data should not block room rendering.
-    } finally {
-      setSeatStateLoaded(true);
-    }
-  }, [roomId]);
-
-  useEffect(() => {
-    if (!seatStateLoaded) {
-      return;
-    }
-
-    setAssignments((current) => reconcileSeatAssignments(users, current));
-  }, [users, seatStateLoaded]);
-
-  useEffect(() => {
-    if (!seatStateLoaded) {
-      return;
-    }
-
-    window.sessionStorage.setItem(
-      getStorageKey(roomId),
-
-      JSON.stringify(assignments),
-    );
-  }, [roomId, assignments, seatStateLoaded]);
 
   useEffect(() => {
     const timers = bubbleTimers.current;
@@ -438,11 +405,28 @@ export default function SpatialRoom({
       return;
     }
 
-    setAssignments((current) => ({
-      ...current,
+    socket.timeout(5000).emit(
+      "presence:seat",
+      {
+        seatId,
+      },
+      (
+        timeoutError: Error | null,
+        response?: {
+          moved: boolean;
+          error?: string;
+        },
+      ) => {
+        if (timeoutError) {
+          console.error("Seat update timed out");
+          return;
+        }
 
-      [currentUserId]: seatId,
-    }));
+        if (!response?.moved) {
+          console.error(response?.error ?? "Unable to move seat");
+        }
+      },
+    );
   }
 
   function closeParticipantMenu() {
@@ -610,6 +594,7 @@ export default function SpatialRoom({
         {roomViewMode === "3D" && (
           <Room3dScene
             className="absolute inset-0"
+            users={users}
             assignments={assignments}
             currentUserId={currentUserId}
             onSeatClick={handleSeatClick}

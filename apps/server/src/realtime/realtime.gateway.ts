@@ -35,7 +35,12 @@ interface RoomPayload {
 
 interface EnterPresencePayload {
   roomId: string;
+
   presenceId: string;
+}
+
+interface PresenceSeatPayload {
+  seatId: string;
 }
 
 interface ChatSendPayload {
@@ -44,6 +49,7 @@ interface ChatSendPayload {
 
 interface MusicSetPayload {
   url: string;
+
   title?: string;
 }
 
@@ -53,27 +59,35 @@ interface MusicPermissionPayload {
 
 interface MusicPlaybackPayload {
   trackId: string;
+
   action: PlaybackAction;
+
   positionSeconds: number;
 }
 
 interface DmSendPayload {
   recipientUserId: string;
+
   content: string;
 }
 
 interface DirectMessage {
   id: string;
+
   roomId: string;
 
   senderUserId: string;
+
   senderDisplayName: string;
+
   senderIdentityType: 'GUEST' | 'REGISTERED';
+
   senderAvatarId?: string;
 
   recipientUserId: string;
 
   content: string;
+
   createdAt: string;
 }
 
@@ -100,23 +114,32 @@ export class RealtimeGateway
 
   afterInit(server: Server) {
     /*
+
      * Socket authentication is optional.
+
      *
+
      * Anonymous sockets may watch rooms.
+
      *
+
      * A provided JWT must be valid.
+
      */
+
     server.use(async (client, next) => {
       const token = client.handshake.auth?.token;
 
       if (typeof token !== 'string' || !token) {
         next();
+
         return;
       }
 
       try {
         const payload = await this.jwtService.verifyAsync<VibeJwtPayload>(
           token,
+
           {
             issuer: 'vibe-auth',
 
@@ -146,6 +169,7 @@ export class RealtimeGateway
           email: payload.email,
 
           imageUrl: payload.imageUrl,
+
           avatarId: payload.avatarId,
         };
 
@@ -228,7 +252,9 @@ export class RealtimeGateway
     ) {
       await this.presenceService.removeUser(
         previousRoomId,
+
         previousPresenceId,
+
         client.id,
       );
 
@@ -247,6 +273,7 @@ export class RealtimeGateway
       identityType: user.type,
 
       email: user.email,
+
       avatarId: user.avatarId,
     });
 
@@ -257,6 +284,32 @@ export class RealtimeGateway
         roomId: payload.roomId,
 
         error: 'Room is full',
+      };
+    }
+
+    const seatId = await this.presenceService.ensureSeat(
+      payload.roomId,
+
+      payload.presenceId,
+
+      client.id,
+    );
+
+    if (!seatId) {
+      await this.presenceService.removeUser(
+        payload.roomId,
+
+        payload.presenceId,
+
+        client.id,
+      );
+
+      return {
+        entered: false,
+
+        roomId: payload.roomId,
+
+        error: 'Unable to assign a room seat',
       };
     }
 
@@ -272,6 +325,60 @@ export class RealtimeGateway
       roomId: payload.roomId,
     };
   }
+
+  @SubscribeMessage('presence:seat')
+  async handlePresenceSeat(
+    @ConnectedSocket()
+    client: Socket,
+
+    @MessageBody()
+    payload: PresenceSeatPayload,
+  ) {
+    const roomId = client.data.roomId as string | undefined;
+
+    const presenceId = client.data.presenceId as string | undefined;
+
+    if (!roomId || !presenceId) {
+      return {
+        moved: false,
+
+        error: 'Join the room before choosing a seat',
+      };
+    }
+
+    const seatId = payload?.seatId?.trim();
+
+    if (!seatId) {
+      return {
+        moved: false,
+
+        error: 'Seat is required',
+      };
+    }
+
+    const result = await this.presenceService.moveSeat(
+      roomId,
+
+      presenceId,
+
+      client.id,
+
+      seatId,
+    );
+
+    if (!result.moved) {
+      return result;
+    }
+
+    await this.broadcastPresence(roomId);
+
+    return {
+      moved: true,
+
+      seatId,
+    };
+  }
+
   @SubscribeMessage('presence:heartbeat')
   async handlePresenceHeartbeat(
     @ConnectedSocket()
@@ -289,15 +396,22 @@ export class RealtimeGateway
 
     const alive = await this.presenceService.heartbeat(
       roomId,
+
       presenceId,
+
       client.id,
     );
 
     /*
+
      * While an active participant is
+
      * heartbeating, also clean abandoned
+
      * participants in the same room.
+
      */
+
     const removed = await this.presenceService.removeStaleUsers(roomId);
 
     if (removed) {
@@ -306,6 +420,7 @@ export class RealtimeGateway
 
     return {
       alive,
+
       roomId,
     };
   }
@@ -347,6 +462,7 @@ export class RealtimeGateway
 
     return {
       roomId,
+
       messages,
     };
   }
@@ -462,6 +578,7 @@ export class RealtimeGateway
 
     const senderPresent = await this.presenceService.isPresent(
       roomId,
+
       presenceId,
     );
 
@@ -510,9 +627,13 @@ export class RealtimeGateway
     }
 
     /*
+
      * Clean abandoned presence records before
+
      * resolving the recipient.
+
      */
+
     const removed = await this.presenceService.removeStaleUsers(roomId);
 
     if (removed) {
@@ -521,6 +642,7 @@ export class RealtimeGateway
 
     const recipient = await this.presenceService.getUserById(
       roomId,
+
       recipientUserId,
     );
 
@@ -533,11 +655,17 @@ export class RealtimeGateway
     }
 
     /*
+
      * Presence stores the socket that currently owns
+
      * this logical VIBE identity.
+
      *
+
      * Do not broadcast DMs to room:${roomId}.
+
      */
+
     const recipientSocket = this.server.sockets.sockets.get(recipient.socketId);
 
     if (!recipientSocket?.connected) {
@@ -569,12 +697,19 @@ export class RealtimeGateway
     };
 
     /*
+
      * Send only to the two participants involved.
+
      *
+
      * Sender receives the same event as the recipient,
+
      * which lets the frontend use one message path
+
      * instead of separately appending acknowledgements.
+
      */
+
     this.server.to([client.id, recipient.socketId]).emit('dm:message', message);
 
     return {
@@ -643,6 +778,7 @@ export class RealtimeGateway
     try {
       const state = await this.musicService.setTrack({
         roomId,
+
         user,
 
         url: payload?.url ?? '',
@@ -738,7 +874,9 @@ export class RealtimeGateway
     try {
       const state = await this.musicService.setPermission(
         roomId,
+
         user,
+
         payload.permission,
       );
 
@@ -764,15 +902,19 @@ export class RealtimeGateway
   @SubscribeMessage('music:playback')
   async handleMusicPlayback(
     @ConnectedSocket() client: Socket,
+
     @MessageBody() payload: MusicPlaybackPayload,
   ) {
     const roomId = client.data.roomId as string | undefined;
+
     const presenceId = client.data.presenceId as string | undefined;
+
     const user = client.data.user as AuthUser | undefined;
 
     if (!roomId || !presenceId || !user) {
       return {
         ok: false,
+
         error: 'Join the room before controlling playback',
       };
     }
@@ -782,6 +924,7 @@ export class RealtimeGateway
     if (!present) {
       return {
         ok: false,
+
         error: 'You are not currently present in this room',
       };
     }
@@ -789,9 +932,13 @@ export class RealtimeGateway
     try {
       const state = await this.musicService.updatePlayback({
         roomId,
+
         user,
+
         trackId: payload?.trackId,
+
         action: payload?.action,
+
         positionSeconds: payload?.positionSeconds,
       });
 
@@ -799,11 +946,13 @@ export class RealtimeGateway
 
       return {
         ok: true,
+
         state,
       };
     } catch (error) {
       return {
         ok: false,
+
         error:
           error instanceof Error ? error.message : 'Unable to update playback',
       };
@@ -833,6 +982,7 @@ export class RealtimeGateway
 
     this.server.to(this.getRoomChannel(roomId)).emit('presence:update', {
       roomId,
+
       users,
 
       count: users.length,

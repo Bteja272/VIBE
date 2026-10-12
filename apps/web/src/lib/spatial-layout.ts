@@ -4,6 +4,7 @@ export interface SpatialParticipant {
   displayName: string;
   identityType: "GUEST" | "REGISTERED";
   avatarId?: string;
+  seatId?: string;
 }
 
 export interface SeatPosition {
@@ -19,11 +20,8 @@ export interface SpatialSeat<T extends SpatialParticipant> {
 }
 
 /*
- * Fixed positions keep participants spatially stable as
- * room occupancy changes.
- *
- * Array order is also the assignment priority:
- * central seats fill before outer seats.
+ * Fixed positions keep participants spatially stable.
+ * The logical seat IDs are shared by both the 2D and 3D renderers.
  */
 export const SPATIAL_SEATS: SeatPosition[] = [
   { id: "seat-1", x: 40, y: 42 },
@@ -116,67 +114,12 @@ export const SPATIAL_SEATS_3D: SeatPosition3D[] = [
   },
 ];
 
-export function getSeatPosition3D(
-  seatId: string,
-): SeatPosition3D | undefined {
-  return SPATIAL_SEATS_3D.find(
-    (seat) => seat.id === seatId,
-  );
+export function getSeatPosition3D(seatId: string): SeatPosition3D | undefined {
+  return SPATIAL_SEATS_3D.find((seat) => seat.id === seatId);
 }
-
-export const SEAT_PRIORITY = SPATIAL_SEATS.map((seat) => seat.id);
 
 export function getSeatPosition(seatId: string): SeatPosition | undefined {
   return SPATIAL_SEATS.find((seat) => seat.id === seatId);
-}
-
-export function reconcileSeatAssignments(
-  participants: SpatialParticipant[],
-  previous: Record<string, string>,
-): Record<string, string> {
-  const activeUserIds = new Set(
-    participants.map((participant) => participant.userId),
-  );
-
-  const next: Record<string, string> = {};
-  const occupiedSeats = new Set<string>();
-
-  // Keep valid assignments for participants who are still present.
-  for (const [userId, seatId] of Object.entries(previous)) {
-    if (!activeUserIds.has(userId)) {
-      continue;
-    }
-
-    if (!getSeatPosition(seatId) || occupiedSeats.has(seatId)) {
-      continue;
-    }
-
-    next[userId] = seatId;
-    occupiedSeats.add(seatId);
-  }
-
-  /*
-   * Stable sorting prevents Redis response order from changing
-   * the seats assigned to newly arrived participants.
-   */
-  const unassigned = participants
-    .filter((participant) => !next[participant.userId])
-    .sort((left, right) => left.userId.localeCompare(right.userId));
-
-  for (const participant of unassigned) {
-    const availableSeat = SEAT_PRIORITY.find(
-      (seatId) => !occupiedSeats.has(seatId),
-    );
-
-    if (!availableSeat) {
-      break;
-    }
-
-    next[participant.userId] = availableSeat;
-    occupiedSeats.add(availableSeat);
-  }
-
-  return next;
 }
 
 export function buildSpatialSeats<T extends SpatialParticipant>(

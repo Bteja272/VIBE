@@ -27,6 +27,7 @@ interface PresenceUser {
   displayName: string;
   identityType: "GUEST" | "REGISTERED";
   avatarId?: string;
+  seatId?: string;
 }
 
 interface PresenceUpdate {
@@ -79,8 +80,8 @@ export default function RoomPresence({
 
     function syncRoom() {
       /*
-       * ensureSocketConnection() and the socket "connect" event can
-       * both reach this function. Sync only once per socket instance.
+       * ensureSocketConnection() and the socket "connect" event can both
+       * reach this function. Sync only once per socket instance.
        */
       if (socket.id && syncedSocketId === socket.id) {
         return;
