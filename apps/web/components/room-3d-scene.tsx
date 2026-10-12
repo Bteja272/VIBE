@@ -30,6 +30,15 @@ interface Room3dSceneProps {
   selectedParticipantId?: string | null;
 
   dmUnreadCounts?: Record<string, number>;
+  activeBubbles?: Record<
+    string,
+    {
+      messageId: string;
+      content: string;
+    }
+  >;
+
+  onChatBubbleClick?: () => void;
 }
 
 interface Seat3dProps {
@@ -58,6 +67,10 @@ interface Avatar3dProps {
   hasUnreadDm: boolean;
 
   onClick?: () => void;
+
+  bubble?: string;
+
+  onBubbleClick?: () => void;
 }
 
 interface AvatarStyle {
@@ -246,7 +259,9 @@ function Avatar3d({
   isCurrentUser,
   selected,
   hasUnreadDm,
+  bubble,
   onClick,
+  onBubbleClick,
 }: Avatar3dProps) {
   const groupRef = useRef<Group>(null);
 
@@ -445,6 +460,62 @@ function Avatar3d({
 
       {/* 3D nameplate */}
 
+      {bubble && (
+        <group
+          position={[0, 2.85, 0]}
+          onClick={(event) => {
+            event.stopPropagation();
+            onBubbleClick?.();
+          }}
+          onPointerEnter={(event) => {
+            if (!onBubbleClick) {
+              return;
+            }
+
+            event.stopPropagation();
+            document.body.style.cursor = "pointer";
+          }}
+          onPointerLeave={() => {
+            document.body.style.cursor = "default";
+          }}
+        >
+          <RoundedBox args={[2.35, 0.72, 0.08]} radius={0.12} smoothness={4}>
+            <meshStandardMaterial
+              color="#f5f5f5"
+              emissive="#262626"
+              emissiveIntensity={0.08}
+            />
+          </RoundedBox>
+
+          <Text
+            position={[0, 0, 0.06]}
+            fontSize={0.145}
+            color="#171717"
+            anchorX="center"
+            anchorY="middle"
+            maxWidth={2}
+            lineHeight={1.15}
+            textAlign="center"
+          >
+            {bubble}
+          </Text>
+
+          <mesh position={[0, -0.42, 0]} rotation={[0, 0, Math.PI / 4]}>
+            <boxGeometry args={[0.2, 0.2, 0.06]} />
+
+            <meshStandardMaterial color="#f5f5f5" />
+          </mesh>
+        </group>
+      )}
+
+      {bubble && !selected && (
+        <mesh position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.5, 0.57, 32]} />
+
+          <meshBasicMaterial color="#d4d4d4" transparent opacity={0.7} />
+        </mesh>
+      )}
+
       <group position={[0, 2.15, 0]}>
         <Text
           fontSize={0.22}
@@ -488,6 +559,8 @@ function RoomEnvironment({
   onParticipantClick,
   selectedParticipantId,
   dmUnreadCounts,
+  activeBubbles,
+  onChatBubbleClick,
 }: {
   users: SpatialParticipant[];
 
@@ -502,6 +575,16 @@ function RoomEnvironment({
   selectedParticipantId?: string | null;
 
   dmUnreadCounts: Record<string, number>;
+
+  activeBubbles: Record<
+    string,
+    {
+      messageId: string;
+      content: string;
+    }
+  >;
+
+  onChatBubbleClick?: () => void;
 }) {
   const occupiedSeatIds = new Set(Object.values(assignments));
 
@@ -620,11 +703,13 @@ function RoomEnvironment({
             isCurrentUser={participant.userId === currentUserId}
             selected={selectedParticipantId === participant.userId}
             hasUnreadDm={(dmUnreadCounts[participant.userId] ?? 0) > 0}
+            bubble={activeBubbles[participant.userId]?.content}
             onClick={
               onParticipantClick
                 ? () => onParticipantClick(participant.userId)
                 : undefined
             }
+            onBubbleClick={onChatBubbleClick}
           />
         );
       })}
@@ -634,17 +719,15 @@ function RoomEnvironment({
 
 export default function Room3dScene({
   className,
-
   users,
-
   assignments,
-
   currentUserId = null,
-
   onSeatClick,
   onParticipantClick,
   selectedParticipantId = null,
   dmUnreadCounts = {},
+  activeBubbles = {},
+  onChatBubbleClick,
 }: Room3dSceneProps) {
   return (
     <div
@@ -672,6 +755,8 @@ export default function Room3dScene({
           onParticipantClick={onParticipantClick}
           selectedParticipantId={selectedParticipantId}
           dmUnreadCounts={dmUnreadCounts}
+          activeBubbles={activeBubbles}
+          onChatBubbleClick={onChatBubbleClick}
         />
 
         <Environment preset="city" />

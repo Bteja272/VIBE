@@ -623,6 +623,8 @@ export default function SpatialRoom({
             onParticipantClick={toggleParticipantMenu}
             selectedParticipantId={openParticipantId}
             dmUnreadCounts={dmUnreadCounts}
+            activeBubbles={activeBubbles}
+            onChatBubbleClick={openChat}
           />
         )}
 
