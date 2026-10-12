@@ -1,8 +1,11 @@
 "use client";
 
 import { useRef } from "react";
+
 import type { Group } from "three";
+
 import { Canvas, useFrame } from "@react-three/fiber";
+
 import { Environment, RoundedBox, Text } from "@react-three/drei";
 
 import {
@@ -21,6 +24,12 @@ interface Room3dSceneProps {
   currentUserId?: string | null;
 
   onSeatClick?: (seatId: string) => void;
+
+  onParticipantClick?: (userId: string) => void;
+
+  selectedParticipantId?: string | null;
+
+  dmUnreadCounts?: Record<string, number>;
 }
 
 interface Seat3dProps {
@@ -43,11 +52,19 @@ interface Avatar3dProps {
   position: [number, number, number];
 
   isCurrentUser: boolean;
+
+  selected: boolean;
+
+  hasUnreadDm: boolean;
+
+  onClick?: () => void;
 }
 
 interface AvatarStyle {
   body: string;
+
   head: string;
+
   accent: string;
 }
 
@@ -56,63 +73,81 @@ function getAvatarStyle(avatarId?: string): AvatarStyle {
     case "frog":
       return {
         body: "#166534",
+
         head: "#4ade80",
+
         accent: "#86efac",
       };
 
     case "cat":
       return {
         body: "#92400e",
+
         head: "#f59e0b",
+
         accent: "#fde68a",
       };
 
     case "ghost":
       return {
         body: "#64748b",
+
         head: "#e2e8f0",
+
         accent: "#f8fafc",
       };
 
     case "blob":
       return {
         body: "#6d28d9",
+
         head: "#a78bfa",
+
         accent: "#ddd6fe",
       };
 
     case "robot":
       return {
         body: "#475569",
+
         head: "#94a3b8",
+
         accent: "#67e8f9",
       };
 
     case "duck":
       return {
         body: "#ca8a04",
+
         head: "#fde047",
+
         accent: "#fb923c",
       };
 
     case "alien":
       return {
         body: "#3f6212",
+
         head: "#84cc16",
+
         accent: "#d9f99d",
       };
 
     case "bear":
       return {
         body: "#78350f",
+
         head: "#a16207",
+
         accent: "#d6d3d1",
       };
 
     default:
       return {
         body: "#404040",
+
         head: "#737373",
+
         accent: "#d4d4d4",
       };
   }
@@ -120,10 +155,15 @@ function getAvatarStyle(avatarId?: string): AvatarStyle {
 
 function Seat3d({
   seatId,
+
   position,
+
   rotation,
+
   occupied,
+
   canMove,
+
   onClick,
 }: Seat3dProps) {
   const interactive = !occupied && canMove;
@@ -155,6 +195,7 @@ function Seat3d({
       }}
     >
       {/* Seat base */}
+
       <RoundedBox
         args={[1.25, 0.25, 0.9]}
         radius={0.12}
@@ -169,6 +210,7 @@ function Seat3d({
       </RoundedBox>
 
       {/* Back rest */}
+
       <RoundedBox
         args={[1.25, 0.95, 0.18]}
         radius={0.1}
@@ -180,6 +222,7 @@ function Seat3d({
       </RoundedBox>
 
       {/* Left leg */}
+
       <mesh position={[-0.42, 0.12, 0]} castShadow>
         <boxGeometry args={[0.12, 0.35, 0.12]} />
 
@@ -187,6 +230,7 @@ function Seat3d({
       </mesh>
 
       {/* Right leg */}
+
       <mesh position={[0.42, 0.12, 0]} castShadow>
         <boxGeometry args={[0.12, 0.35, 0.12]} />
 
@@ -196,18 +240,31 @@ function Seat3d({
   );
 }
 
-function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
+function Avatar3d({
+  participant,
+  position,
+  isCurrentUser,
+  selected,
+  hasUnreadDm,
+  onClick,
+}: Avatar3dProps) {
   const groupRef = useRef<Group>(null);
 
   const style = getAvatarStyle(participant.avatarId);
 
   /*
+
    * Each avatar receives a deterministic phase
+
    * so everyone does not bob in perfect sync.
+
    */
+
   const phase =
     participant.userId
+
       .split("")
+
       .reduce((total, character) => total + character.charCodeAt(0), 0) % 10;
 
   useFrame(({ clock }) => {
@@ -218,18 +275,50 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
     }
 
     /*
+
      * Very subtle idle movement.
+
      *
+
      * The base y coordinate remains stable;
+
      * only the visual avatar group moves.
+
      */
+
     group.position.y =
       position[1] + Math.sin(clock.elapsedTime * 1.5 + phase) * 0.025;
   });
 
   return (
-    <group ref={groupRef} position={position}>
+    <group
+      ref={groupRef}
+      position={position}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.();
+      }}
+      onPointerEnter={(event) => {
+        if (!onClick) {
+          return;
+        }
+
+        event.stopPropagation();
+        document.body.style.cursor = "pointer";
+      }}
+      onPointerLeave={() => {
+        document.body.style.cursor = "default";
+      }}
+    >
+      {selected && (
+        <mesh position={[0, 0.06, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.48, 0.62, 32]} />
+          <meshBasicMaterial color="#f5f5f5" transparent opacity={0.85} />
+        </mesh>
+      )}
+
       {/* Shadow */}
+
       <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[0.4, 24]} />
 
@@ -237,6 +326,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </mesh>
 
       {/* Torso */}
+
       <RoundedBox
         args={[0.62, 0.72, 0.42]}
         radius={0.16}
@@ -248,6 +338,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </RoundedBox>
 
       {/* Head */}
+
       <mesh position={[0, 1.5, 0]} castShadow>
         <sphereGeometry args={[0.36, 20, 20]} />
 
@@ -255,6 +346,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </mesh>
 
       {/* Left eye */}
+
       <mesh position={[-0.13, 1.55, 0.32]}>
         <sphereGeometry args={[0.055, 12, 12]} />
 
@@ -262,6 +354,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </mesh>
 
       {/* Right eye */}
+
       <mesh position={[0.13, 1.55, 0.32]}>
         <sphereGeometry args={[0.055, 12, 12]} />
 
@@ -269,6 +362,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </mesh>
 
       {/* Avatar accent */}
+
       <mesh position={[0, 1.38, 0.34]}>
         <sphereGeometry args={[0.055, 12, 12]} />
 
@@ -276,6 +370,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </mesh>
 
       {/* Left arm */}
+
       <RoundedBox
         args={[0.18, 0.55, 0.18]}
         radius={0.08}
@@ -288,6 +383,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </RoundedBox>
 
       {/* Right arm */}
+
       <RoundedBox
         args={[0.18, 0.55, 0.18]}
         radius={0.08}
@@ -300,6 +396,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </RoundedBox>
 
       {/* Left leg */}
+
       <RoundedBox
         args={[0.22, 0.5, 0.24]}
         radius={0.08}
@@ -311,6 +408,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </RoundedBox>
 
       {/* Right leg */}
+
       <RoundedBox
         args={[0.22, 0.5, 0.24]}
         radius={0.08}
@@ -322,6 +420,7 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
       </RoundedBox>
 
       {/* Online indicator */}
+
       <mesh position={[0.38, 1.72, 0.15]}>
         <sphereGeometry args={[0.075, 12, 12]} />
 
@@ -332,7 +431,20 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
         />
       </mesh>
 
-      {/* HTML nameplate */}
+      {hasUnreadDm && !isCurrentUser && (
+        <mesh position={[-0.38, 1.72, 0.15]}>
+          <sphereGeometry args={[0.085, 12, 12]} />
+
+          <meshStandardMaterial
+            color="#ef4444"
+            emissive="#dc2626"
+            emissiveIntensity={0.85}
+          />
+        </mesh>
+      )}
+
+      {/* 3D nameplate */}
+
       <group position={[0, 2.15, 0]}>
         <Text
           fontSize={0.22}
@@ -367,9 +479,15 @@ function Avatar3d({ participant, position, isCurrentUser }: Avatar3dProps) {
 
 function RoomEnvironment({
   users,
+
   assignments,
+
   currentUserId,
+
   onSeatClick,
+  onParticipantClick,
+  selectedParticipantId,
+  dmUnreadCounts,
 }: {
   users: SpatialParticipant[];
 
@@ -378,6 +496,12 @@ function RoomEnvironment({
   currentUserId?: string | null;
 
   onSeatClick?: (seatId: string) => void;
+
+  onParticipantClick?: (userId: string) => void;
+
+  selectedParticipantId?: string | null;
+
+  dmUnreadCounts: Record<string, number>;
 }) {
   const occupiedSeatIds = new Set(Object.values(assignments));
 
@@ -388,6 +512,7 @@ function RoomEnvironment({
       <directionalLight position={[4, 8, 5]} intensity={2} castShadow />
 
       {/* Floor */}
+
       <mesh position={[0, -0.05, 0]} receiveShadow>
         <boxGeometry args={[12, 0.1, 9]} />
 
@@ -395,6 +520,7 @@ function RoomEnvironment({
       </mesh>
 
       {/* Back wall */}
+
       <mesh position={[0, 2.5, -4.45]} receiveShadow>
         <boxGeometry args={[12, 5, 0.1]} />
 
@@ -402,6 +528,7 @@ function RoomEnvironment({
       </mesh>
 
       {/* Left wall */}
+
       <mesh position={[-5.95, 2.5, 0]}>
         <boxGeometry args={[0.1, 5, 9]} />
 
@@ -409,6 +536,7 @@ function RoomEnvironment({
       </mesh>
 
       {/* Right wall */}
+
       <mesh position={[5.95, 2.5, 0]}>
         <boxGeometry args={[0.1, 5, 9]} />
 
@@ -416,6 +544,7 @@ function RoomEnvironment({
       </mesh>
 
       {/* Rear display */}
+
       <RoundedBox
         args={[3.4, 1.5, 0.12]}
         radius={0.12}
@@ -426,6 +555,7 @@ function RoomEnvironment({
       </RoundedBox>
 
       {/* Center table */}
+
       <RoundedBox
         args={[2.7, 0.28, 1.1]}
         radius={0.15}
@@ -438,6 +568,7 @@ function RoomEnvironment({
       </RoundedBox>
 
       {/* Physical seats */}
+
       {SPATIAL_SEATS_3D.map((seat) => (
         <Seat3d
           key={seat.id}
@@ -451,6 +582,7 @@ function RoomEnvironment({
       ))}
 
       {/* Active participants */}
+
       {users.map((participant) => {
         const seatId = assignments[participant.userId];
 
@@ -465,12 +597,18 @@ function RoomEnvironment({
         }
 
         /*
+
          * Raise the avatar slightly above
+
          * the physical seat base.
+
          */
+
         const avatarPosition: [number, number, number] = [
           seat.position[0],
+
           seat.position[1] + 0.3,
+
           seat.position[2],
         ];
 
@@ -480,6 +618,13 @@ function RoomEnvironment({
             participant={participant}
             position={avatarPosition}
             isCurrentUser={participant.userId === currentUserId}
+            selected={selectedParticipantId === participant.userId}
+            hasUnreadDm={(dmUnreadCounts[participant.userId] ?? 0) > 0}
+            onClick={
+              onParticipantClick
+                ? () => onParticipantClick(participant.userId)
+                : undefined
+            }
           />
         );
       })}
@@ -489,10 +634,17 @@ function RoomEnvironment({
 
 export default function Room3dScene({
   className,
+
   users,
+
   assignments,
+
   currentUserId = null,
+
   onSeatClick,
+  onParticipantClick,
+  selectedParticipantId = null,
+  dmUnreadCounts = {},
 }: Room3dSceneProps) {
   return (
     <div
@@ -503,6 +655,7 @@ export default function Room3dScene({
         dpr={[1, 1.5]}
         camera={{
           position: [0, 7.2, 10.5],
+
           fov: 44,
         }}
         gl={{
@@ -516,6 +669,9 @@ export default function Room3dScene({
           assignments={assignments}
           currentUserId={currentUserId}
           onSeatClick={onSeatClick}
+          onParticipantClick={onParticipantClick}
+          selectedParticipantId={selectedParticipantId}
+          dmUnreadCounts={dmUnreadCounts}
         />
 
         <Environment preset="city" />

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RoomChat from "@/components/room-chat";
 
 import RoomDm from "@/components/room-dm";
+
 import Room3dScene from "@/components/room-3d-scene";
 
 import RoomMusic from "@/components/room-music";
@@ -80,7 +81,7 @@ function truncateText(content: string, maxLength: number) {
 }
 
 function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&");
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function messageMentionsUser(
@@ -95,8 +96,7 @@ function messageMentionsUser(
   const escapedName = escapeRegExp(currentUser.displayName.trim());
 
   const expression = new RegExp(
-    `(?:^|\\\s)@${escapedName}(?=\\\s|$|[.,!?;:])`,
-
+    `(?:^|\\s)@${escapedName}(?=\\s|$|[.,!?;:])`,
     "i",
   );
 
@@ -164,9 +164,12 @@ export default function SpatialRoom({
     () =>
       Object.fromEntries(
         users
+
           .filter((user) => Boolean(user.seatId))
+
           .map((user) => [user.userId, user.seatId as string]),
       ),
+
     [users],
   );
 
@@ -180,6 +183,14 @@ export default function SpatialRoom({
     () => buildSpatialSeats(users, assignments),
 
     [users, assignments],
+  );
+
+  const selectedParticipant = useMemo(
+    () =>
+      openParticipantId
+        ? users.find((user) => user.userId === openParticipantId)
+        : undefined,
+    [users, openParticipantId],
   );
 
   useEffect(() => {
@@ -328,9 +339,15 @@ export default function SpatialRoom({
 
   /*
 
+
+
    * Spatial-room ambient behavior must remain active even while
 
+
+
    * the chat drawer is closed.
+
+
 
    */
 
@@ -407,18 +424,23 @@ export default function SpatialRoom({
 
     socket.timeout(5000).emit(
       "presence:seat",
+
       {
         seatId,
       },
+
       (
         timeoutError: Error | null,
+
         response?: {
           moved: boolean;
+
           error?: string;
         },
       ) => {
         if (timeoutError) {
           console.error("Seat update timed out");
+
           return;
         }
 
@@ -598,6 +620,9 @@ export default function SpatialRoom({
             assignments={assignments}
             currentUserId={currentUserId}
             onSeatClick={handleSeatClick}
+            onParticipantClick={toggleParticipantMenu}
+            selectedParticipantId={openParticipantId}
+            dmUnreadCounts={dmUnreadCounts}
           />
         )}
 
@@ -942,6 +967,83 @@ export default function SpatialRoom({
           </>
         )}
 
+        {roomViewMode === "3D" && selectedParticipant && (
+          <div
+            data-participant-menu
+            className="absolute bottom-5 left-1/2 z-30 w-[min(22rem,calc(100%-2rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950/95 shadow-2xl backdrop-blur"
+          >
+            <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <VibeAvatar avatarId={selectedParticipant.avatarId} size="sm" />
+
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-neutral-100">
+                    {selectedParticipant.displayName}
+                  </p>
+
+                  <p className="mt-0.5 text-xs text-neutral-500">
+                    {selectedParticipant.userId === currentUserId
+                      ? `You · ${
+                          selectedParticipant.identityType === "GUEST"
+                            ? "Guest"
+                            : "Registered"
+                        }`
+                      : selectedParticipant.identityType === "GUEST"
+                        ? "Guest"
+                        : "Registered"}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeParticipantMenu}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+                aria-label="Close participant actions"
+              >
+                ×
+              </button>
+            </div>
+
+            {selectedParticipant.userId === currentUserId ? (
+              <div className="px-4 py-3">
+                <p className="text-xs leading-5 text-neutral-500">
+                  This is you. Click an empty 3D seat to move.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2 p-3">
+                <button
+                  type="button"
+                  onClick={() => mentionParticipant(selectedParticipant)}
+                  disabled={!currentUserId}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2.5 text-sm text-neutral-200 transition hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span aria-hidden="true" className="font-semibold">
+                    @
+                  </span>
+                  Mention
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => openDm(selectedParticipant)}
+                  disabled={!currentUserId}
+                  className="relative flex items-center justify-center gap-2 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2.5 text-sm text-neutral-200 transition hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span aria-hidden="true">💬</span>
+                  Message
+                  {(dmUnreadCounts[selectedParticipant.userId] ?? 0) > 0 && (
+                    <span className="absolute -right-1 -top-1 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-bold text-neutral-950">
+                      {dmUnreadCounts[selectedParticipant.userId]}
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Chat drawer */}
 
         {chatOpen && (
@@ -1065,21 +1167,39 @@ export default function SpatialRoom({
 
         {/*
 
+
+
           * Keep RoomMusic mounted even while the panel is closed.
 
+
+
           *
+
+
 
           * The YouTube player lives inside RoomMusic. Unmounting this
 
+
+
           * component would destroy the iframe and stop local playback.
+
+
 
           *
 
+
+
           * Closing the popover should therefore only hide the UI.
+
+
 
           * Shared playback continues until the track is paused/cleared
 
+
+
           * or the user leaves the room.
+
+
 
           */}
 
