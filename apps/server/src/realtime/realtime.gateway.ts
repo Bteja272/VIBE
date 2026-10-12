@@ -27,6 +27,8 @@ import {
 
 import { PresenceService } from './presence.service';
 
+import { randomUUID } from 'node:crypto';
+
 interface RoomPayload {
   roomId: string;
 }
@@ -53,6 +55,26 @@ interface MusicPlaybackPayload {
   trackId: string;
   action: PlaybackAction;
   positionSeconds: number;
+}
+
+interface DmSendPayload {
+  recipientUserId: string;
+  content: string;
+}
+
+interface DirectMessage {
+  id: string;
+  roomId: string;
+
+  senderUserId: string;
+  senderDisplayName: string;
+  senderIdentityType: 'GUEST' | 'REGISTERED';
+  senderAvatarId?: string;
+
+  recipientUserId: string;
+
+  content: string;
+  createdAt: string;
 }
 
 @WebSocketGateway({
@@ -414,6 +436,152 @@ export class RealtimeGateway
         error: 'Failed to send message',
       };
     }
+  }
+
+  @SubscribeMessage('dm:send')
+  async handleDmSend(
+    @ConnectedSocket()
+    client: Socket,
+
+    @MessageBody()
+    payload: DmSendPayload,
+  ) {
+    const roomId = client.data.roomId as string | undefined;
+
+    const presenceId = client.data.presenceId as string | undefined;
+
+    const user = client.data.user as AuthUser | undefined;
+
+    if (!roomId || !presenceId || !user) {
+      return {
+        sent: false,
+
+        error: 'Join the room before sending direct messages',
+      };
+    }
+
+    const senderPresent = await this.presenceService.isPresent(
+      roomId,
+      presenceId,
+    );
+
+    if (!senderPresent) {
+      return {
+        sent: false,
+
+        error: 'You are not currently present in this room',
+      };
+    }
+
+    const recipientUserId = payload?.recipientUserId?.trim();
+
+    if (!recipientUserId) {
+      return {
+        sent: false,
+
+        error: 'Recipient is required',
+      };
+    }
+
+    if (recipientUserId === user.id) {
+      return {
+        sent: false,
+
+        error: 'You cannot message yourself',
+      };
+    }
+
+    const content = payload?.content?.trim();
+
+    if (!content) {
+      return {
+        sent: false,
+
+        error: 'Message cannot be empty',
+      };
+    }
+
+    if (content.length > 500) {
+      return {
+        sent: false,
+
+        error: 'Message cannot exceed 500 characters',
+      };
+    }
+
+    /*
+     * Clean abandoned presence records before
+     * resolving the recipient.
+     */
+    const removed = await this.presenceService.removeStaleUsers(roomId);
+
+    if (removed) {
+      await this.broadcastPresence(roomId);
+    }
+
+    const recipient = await this.presenceService.getUserById(
+      roomId,
+      recipientUserId,
+    );
+
+    if (!recipient) {
+      return {
+        sent: false,
+
+        error: 'That participant is no longer in the room',
+      };
+    }
+
+    /*
+     * Presence stores the socket that currently owns
+     * this logical VIBE identity.
+     *
+     * Do not broadcast DMs to room:${roomId}.
+     */
+    const recipientSocket = this.server.sockets.sockets.get(recipient.socketId);
+
+    if (!recipientSocket?.connected) {
+      return {
+        sent: false,
+
+        error: 'That participant is no longer available',
+      };
+    }
+
+    const message: DirectMessage = {
+      id: randomUUID(),
+
+      roomId,
+
+      senderUserId: user.id,
+
+      senderDisplayName: user.displayName,
+
+      senderIdentityType: user.type,
+
+      senderAvatarId: user.avatarId,
+
+      recipientUserId: recipient.userId,
+
+      content,
+
+      createdAt: new Date().toISOString(),
+    };
+
+    /*
+     * Send only to the two participants involved.
+     *
+     * Sender receives the same event as the recipient,
+     * which lets the frontend use one message path
+     * instead of separately appending acknowledgements.
+     */
+    this.server.to([client.id, recipient.socketId]).emit('dm:message', message);
+
+    return {
+      sent: true,
+
+      message,
+    };
   }
 
   @SubscribeMessage('music:get')

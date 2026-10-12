@@ -57,6 +57,15 @@ export class PresenceService implements OnModuleInit, OnModuleDestroy {
     return this.redis.hExists(this.getPresenceKey(roomId), presenceId);
   }
 
+  async getUserById(
+    roomId: string,
+    userId: string,
+  ): Promise<PresenceUser | null> {
+    const users = await this.getUsers(roomId);
+
+    return users.find((user) => user.userId === userId) ?? null;
+  }
+
   async addUser(roomId: string, user: PresenceUserInput): Promise<boolean> {
     /*
      * Clear abandoned entries before
