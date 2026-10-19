@@ -46,6 +46,11 @@ export interface SeatPosition3D {
   rotation: [number, number, number];
 }
 
+/*
+ * Lounge layout.
+ *
+ * These coordinates preserve the existing three-row room arrangement.
+ */
 export const SPATIAL_SEATS_3D: SeatPosition3D[] = [
   // Back row
   {
@@ -114,8 +119,81 @@ export const SPATIAL_SEATS_3D: SeatPosition3D[] = [
   },
 ];
 
-export function getSeatPosition3D(seatId: string): SeatPosition3D | undefined {
-  return SPATIAL_SEATS_3D.find((seat) => seat.id === seatId);
+/*
+ * Campfire layout.
+ *
+ * Logical seat IDs remain exactly the same as the Lounge and as the
+ * server-authoritative Redis presence state. Only their 3D presentation
+ * changes. The chairs form an ellipse around the fire and face inward.
+ */
+export const CAMPFIRE_SPATIAL_SEATS_3D: SeatPosition3D[] = [
+  {
+    id: "seat-1",
+    position: [0, 0.35, -2.8],
+    rotation: [0, 0, 0],
+  },
+  {
+    id: "seat-2",
+    position: [2.1, 0.35, -2.425],
+    rotation: [0, -Math.PI / 6, 0],
+  },
+  {
+    id: "seat-3",
+    position: [3.637, 0.35, -1.4],
+    rotation: [0, -Math.PI / 3, 0],
+  },
+  {
+    id: "seat-4",
+    position: [4.2, 0.35, 0],
+    rotation: [0, -Math.PI / 2, 0],
+  },
+  {
+    id: "seat-5",
+    position: [3.637, 0.35, 1.4],
+    rotation: [0, -(2 * Math.PI) / 3, 0],
+  },
+  {
+    id: "seat-6",
+    position: [2.1, 0.35, 2.425],
+    rotation: [0, -(5 * Math.PI) / 6, 0],
+  },
+  {
+    id: "seat-7",
+    position: [0, 0.35, 2.8],
+    rotation: [0, Math.PI, 0],
+  },
+  {
+    id: "seat-8",
+    position: [-2.1, 0.35, 2.425],
+    rotation: [0, (5 * Math.PI) / 6, 0],
+  },
+  {
+    id: "seat-9",
+    position: [-3.637, 0.35, 1.4],
+    rotation: [0, (2 * Math.PI) / 3, 0],
+  },
+  {
+    id: "seat-10",
+    position: [-4.2, 0.35, 0],
+    rotation: [0, Math.PI / 2, 0],
+  },
+  {
+    id: "seat-11",
+    position: [-3.637, 0.35, -1.4],
+    rotation: [0, Math.PI / 3, 0],
+  },
+  {
+    id: "seat-12",
+    position: [-2.1, 0.35, -2.425],
+    rotation: [0, Math.PI / 6, 0],
+  },
+];
+
+export function getSeatPosition3D(
+  seatId: string,
+  seats: SeatPosition3D[] = SPATIAL_SEATS_3D,
+): SeatPosition3D | undefined {
+  return seats.find((seat) => seat.id === seatId);
 }
 
 export function getSeatPosition(seatId: string): SeatPosition | undefined {

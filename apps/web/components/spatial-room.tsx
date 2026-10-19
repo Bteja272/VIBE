@@ -11,6 +11,7 @@ import RoomChat from "@/components/room-chat";
 import RoomDm from "@/components/room-dm";
 
 import Room3dScene from "@/components/room-3d-scene";
+import type { Room3dEnvironmentId } from "@/components/room-3d-environments";
 
 import RoomMusic, {
   type RoomMusicState,
@@ -142,6 +143,9 @@ export default function SpatialRoom({
   const [boardHiddenForMe, setBoardHiddenForMe] = useState(false);
 
   const [roomViewMode, setRoomViewMode] = useState<RoomViewMode>("3D");
+
+  const [roomEnvironmentId, setRoomEnvironmentId] =
+    useState<Room3dEnvironmentId>("LOUNGE");
 
   const [webglUnavailable, setWebglUnavailable] = useState(false);
 
@@ -789,6 +793,29 @@ export default function SpatialRoom({
             })}
           </div>
 
+          {roomViewMode === "3D" && !webglUnavailable && (
+            <div
+              className="flex rounded-lg border border-neutral-800 bg-neutral-950 p-1"
+              aria-label="3D environment"
+            >
+              {(["LOUNGE", "CAMPFIRE"] as const).map((environmentId) => (
+                <button
+                  key={environmentId}
+                  type="button"
+                  onClick={() => setRoomEnvironmentId(environmentId)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                    roomEnvironmentId === environmentId
+                      ? "bg-neutral-800 text-neutral-100"
+                      : "text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200"
+                  }`}
+                  aria-pressed={roomEnvironmentId === environmentId}
+                >
+                  {environmentId === "LOUNGE" ? "Lounge" : "Campfire"}
+                </button>
+              ))}
+            </div>
+          )}
+
           <p className="text-sm text-neutral-500">
             {users.length}/{capacity}
           </p>
@@ -811,6 +838,7 @@ export default function SpatialRoom({
         {roomViewMode === "3D" && (
           <Room3dScene
             className="absolute inset-0"
+            environmentId={roomEnvironmentId}
             users={users}
             assignments={assignments}
             currentUserId={currentUserId}
