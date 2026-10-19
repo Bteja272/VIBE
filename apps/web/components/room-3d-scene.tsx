@@ -1,10 +1,18 @@
 "use client";
 
-import { useRef } from "react";
+import {
+  Component,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
 
-import type { Group } from "three";
+import { PerspectiveCamera, Vector3, type Group } from "three";
 
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 
 import { Environment, RoundedBox, Text } from "@react-three/drei";
 
@@ -49,6 +57,8 @@ interface Room3dSceneProps {
   boardHidden?: boolean;
 
   boardPlayback?: MusicPlaybackState | null;
+
+  onWebglFailure?: () => void;
 }
 
 interface Seat3dProps {
@@ -89,6 +99,166 @@ interface AvatarStyle {
   head: string;
 
   accent: string;
+}
+
+interface BoardScreenRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+interface WebglErrorBoundaryProps {
+  children: ReactNode;
+  onFailure: () => void;
+}
+
+interface WebglErrorBoundaryState {
+  failed: boolean;
+}
+
+/*
+ * React Three Fiber ultimately depends on the browser creating a WebGL
+ * rendering context. A React error boundary catches initialization/render
+ * failures that would otherwise leave the room blank.
+ */
+class WebglErrorBoundary extends Component<
+  WebglErrorBoundaryProps,
+  WebglErrorBoundaryState
+> {
+  state: WebglErrorBoundaryState = {
+    failed: false,
+  };
+
+  static getDerivedStateFromError(): WebglErrorBoundaryState {
+    return {
+      failed: true,
+    };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error("3D room failed to render:", error, info);
+
+    this.props.onFailure();
+  }
+
+  render() {
+    if (this.state.failed) {
+      return null;
+    }
+
+    return this.props.children;
+  }
+}
+
+function WebglContextGuard({ onFailure }: { onFailure: () => void }) {
+  const { gl } = useThree();
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+
+    function handleContextLost(event: Event) {
+      /*
+       * Prevent the browser's default restoration loop because VIBE
+       * immediately falls back to the existing 2D room instead.
+       */
+      event.preventDefault();
+
+      onFailure();
+    }
+
+    canvas.addEventListener("webglcontextlost", handleContextLost);
+
+    return () => {
+      canvas.removeEventListener("webglcontextlost", handleContextLost);
+    };
+  }, [gl, onFailure]);
+
+  return null;
+}
+
+const BASE_CAMERA_FOV = 44;
+
+const RESPONSIVE_REFERENCE_ASPECT = 1.35;
+
+const MAX_RESPONSIVE_FOV = 68;
+
+/*
+ * These coordinates describe the usable inner face of the
+ * physical rear display rather than its outer frame.
+ *
+ * Projecting the actual 3D board coordinates into screen space
+ * keeps the DOM media surface aligned as the Canvas resizes.
+ */
+const BOARD_SURFACE_TOP_LEFT = new Vector3(-1.55, 3.25, -4.24);
+
+const BOARD_SURFACE_BOTTOM_RIGHT = new Vector3(1.55, 1.95, -4.24);
+
+function SceneViewportSync({
+  onBoardRectChange,
+}: {
+  onBoardRectChange: (rect: BoardScreenRect) => void;
+}) {
+  const { camera, size } = useThree();
+
+  useEffect(() => {
+    if (
+      !(camera instanceof PerspectiveCamera) ||
+      size.width <= 0 ||
+      size.height <= 0
+    ) {
+      return;
+    }
+
+    const aspect = size.width / size.height;
+
+    /*
+     * Keep the current desktop composition unchanged.
+     *
+     * On narrower containers, widen the vertical FOV just enough
+     * to preserve more of the room horizontally instead of
+     * cropping the left/right seats.
+     */
+    const baseFovRadians = (BASE_CAMERA_FOV * Math.PI) / 180;
+
+    const responsiveFov =
+      aspect < RESPONSIVE_REFERENCE_ASPECT
+        ? (2 *
+            Math.atan(
+              Math.tan(baseFovRadians / 2) *
+                (RESPONSIVE_REFERENCE_ASPECT / aspect),
+            ) *
+            180) /
+          Math.PI
+        : BASE_CAMERA_FOV;
+
+    camera.fov = Math.min(MAX_RESPONSIVE_FOV, responsiveFov);
+
+    camera.updateProjectionMatrix();
+
+    camera.updateMatrixWorld();
+
+    const topLeft = BOARD_SURFACE_TOP_LEFT.clone().project(camera);
+
+    const bottomRight = BOARD_SURFACE_BOTTOM_RIGHT.clone().project(camera);
+
+    const left = ((topLeft.x + 1) / 2) * size.width;
+
+    const top = ((1 - topLeft.y) / 2) * size.height;
+
+    const right = ((bottomRight.x + 1) / 2) * size.width;
+
+    const bottom = ((1 - bottomRight.y) / 2) * size.height;
+
+    onBoardRectChange({
+      left,
+      top,
+      width: Math.max(0, right - left),
+      height: Math.max(0, bottom - top),
+    });
+  }, [camera, size.width, size.height, onBoardRectChange]);
+
+  return null;
 }
 
 function getAvatarStyle(avatarId?: string): AvatarStyle {
@@ -747,57 +917,96 @@ export default function Room3dScene({
   boardState = null,
   boardHidden = false,
   boardPlayback = null,
+  onWebglFailure,
 }: Room3dSceneProps) {
+  const [boardRect, setBoardRect] = useState<BoardScreenRect | null>(null);
+
+  const handleBoardRectChange = useCallback((nextRect: BoardScreenRect) => {
+    setBoardRect((current) => {
+      if (
+        current &&
+        Math.abs(current.left - nextRect.left) < 0.5 &&
+        Math.abs(current.top - nextRect.top) < 0.5 &&
+        Math.abs(current.width - nextRect.width) < 0.5 &&
+        Math.abs(current.height - nextRect.height) < 0.5
+      ) {
+        return current;
+      }
+
+      return nextRect;
+    });
+  }, []);
+
+  const handleWebglFailure = useCallback(() => {
+    onWebglFailure?.();
+  }, [onWebglFailure]);
+
   return (
     <div
       className={
         className ?? "relative h-full min-h-[520px] w-full sm:min-h-[620px]"
       }
     >
-      <Canvas
-        shadows
-        dpr={[1, 1.5]}
-        camera={{
-          position: [0, 7.2, 10.5],
+      <WebglErrorBoundary onFailure={handleWebglFailure}>
+        <Canvas
+          shadows
+          dpr={[1, 1.5]}
+          camera={{
+            position: [0, 7.2, 10.5],
 
-          fov: 44,
-        }}
-        gl={{
-          antialias: true,
-        }}
-      >
-        <color attach="background" args={["#0a0a0a"]} />
+            fov: 44,
+          }}
+          gl={{
+            antialias: true,
+          }}
+        >
+          <color attach="background" args={["#0a0a0a"]} />
 
-        <RoomEnvironment
-          users={users}
-          assignments={assignments}
-          currentUserId={currentUserId}
-          onSeatClick={onSeatClick}
-          onParticipantClick={onParticipantClick}
-          selectedParticipantId={selectedParticipantId}
-          dmUnreadCounts={dmUnreadCounts}
-          activeBubbles={activeBubbles}
-          onChatBubbleClick={onChatBubbleClick}
-        />
+          <WebglContextGuard onFailure={handleWebglFailure} />
 
-        <Environment preset="city" />
-      </Canvas>
+          <SceneViewportSync onBoardRectChange={handleBoardRectChange} />
+
+          <RoomEnvironment
+            users={users}
+            assignments={assignments}
+            currentUserId={currentUserId}
+            onSeatClick={onSeatClick}
+            onParticipantClick={onParticipantClick}
+            selectedParticipantId={selectedParticipantId}
+            dmUnreadCounts={dmUnreadCounts}
+            activeBubbles={activeBubbles}
+            onChatBubbleClick={onChatBubbleClick}
+          />
+
+          <Environment preset="city" />
+        </Canvas>
+      </WebglErrorBoundary>
 
       {/*
-       * The camera is fixed, so the rear display has a stable screen-space
-       * projection. Keep the media DOM surface tightly aligned to that
-       * physical display instead of floating across the room.
+       * YouTube remains a DOM player, but its container is now positioned
+       * from the actual projected 3D board coordinates.
        *
-       * pointer-events-none is intentional: board media must never steal
-       * clicks from chairs or participants in the WebGL scene.
+       * The wrapper never accepts pointer events, so board media cannot
+       * block chairs, avatars, or any other Canvas interaction.
        */}
-      <RoomBoardSurface
-        state={boardState}
-        hidden={boardHidden}
-        linkedPlayback={boardPlayback}
-        className="absolute left-1/2 top-[5.1%] z-10 h-[12.8%] aspect-[34/15] -translate-x-1/2 rounded-[0.35rem] border border-neutral-800/70 shadow-sm"
-      />
-
+      {boardRect && (
+        <div
+          className="pointer-events-none absolute z-10"
+          style={{
+            left: boardRect.left,
+            top: boardRect.top,
+            width: boardRect.width,
+            height: boardRect.height,
+          }}
+        >
+          <RoomBoardSurface
+            state={boardState}
+            hidden={boardHidden}
+            linkedPlayback={boardPlayback}
+            className="h-full w-full rounded-[0.35rem] border border-neutral-800/70 shadow-sm"
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -143,6 +143,10 @@ export default function SpatialRoom({
 
   const [roomViewMode, setRoomViewMode] = useState<RoomViewMode>("3D");
 
+  const [webglUnavailable, setWebglUnavailable] = useState(false);
+
+  const [webglFallbackNotice, setWebglFallbackNotice] = useState(false);
+
   const [activeDmParticipant, setActiveDmParticipant] =
     useState<SpatialParticipant | null>(null);
 
@@ -272,6 +276,20 @@ export default function SpatialRoom({
       window.clearTimeout(timer);
     };
   }, [mentionNotification]);
+
+  useEffect(() => {
+    if (!webglFallbackNotice) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setWebglFallbackNotice(false);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [webglFallbackNotice]);
 
   useEffect(() => {
     if (!openParticipantId) {
@@ -519,7 +537,8 @@ export default function SpatialRoom({
           if (!response?.ok) {
             resolve({
               ok: false,
-              error: response?.error ?? "Unable to show music on the room board",
+              error:
+                response?.error ?? "Unable to show music on the room board",
             });
             return;
           }
@@ -701,6 +720,16 @@ export default function SpatialRoom({
     setMentionNotification(null);
   }
 
+  const handleWebglFailure = useCallback(() => {
+    setWebglUnavailable(true);
+
+    setRoomViewMode("2D");
+
+    setWebglFallbackNotice(true);
+
+    setOpenParticipantId(null);
+  }, []);
+
   const handleChatPrefillConsumed = useCallback(() => {
     setChatPrefill(null);
   }, []);
@@ -721,21 +750,43 @@ export default function SpatialRoom({
             className="flex rounded-lg border border-neutral-800 bg-neutral-950 p-1"
             aria-label="Room view"
           >
-            {(["2D", "3D"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setRoomViewMode(mode)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                  roomViewMode === mode
-                    ? "bg-neutral-100 text-neutral-950"
-                    : "text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
-                }`}
-                aria-pressed={roomViewMode === mode}
-              >
-                {mode}
-              </button>
-            ))}
+            {(["2D", "3D"] as const).map((mode) => {
+              const disabled = mode === "3D" && webglUnavailable;
+
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    if (disabled) {
+                      return;
+                    }
+
+                    setRoomViewMode(mode);
+
+                    if (mode === "3D") {
+                      setWebglFallbackNotice(false);
+                    }
+                  }}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                    roomViewMode === mode
+                      ? "bg-neutral-100 text-neutral-950"
+                      : disabled
+                        ? "cursor-not-allowed text-neutral-700"
+                        : "text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+                  }`}
+                  aria-pressed={roomViewMode === mode}
+                  title={
+                    disabled
+                      ? "3D view is unavailable in this browser session"
+                      : `Switch to ${mode} view`
+                  }
+                >
+                  {mode}
+                </button>
+              );
+            })}
           </div>
 
           <p className="text-sm text-neutral-500">
@@ -772,7 +823,17 @@ export default function SpatialRoom({
             boardState={boardState}
             boardHidden={boardHiddenForMe}
             boardPlayback={boardPlayback}
+            onWebglFailure={handleWebglFailure}
           />
+        )}
+
+        {webglFallbackNotice && (
+          <div
+            role="status"
+            className="pointer-events-none absolute left-1/2 top-4 z-[60] w-[min(28rem,calc(100%-8rem))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-neutral-950/95 px-4 py-3 text-center text-xs text-neutral-200 shadow-xl backdrop-blur"
+          >
+            3D view unavailable. Switched to 2D.
+          </div>
         )}
 
         {roomViewMode === "2D" && (

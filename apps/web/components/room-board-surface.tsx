@@ -71,7 +71,7 @@ export default function RoomBoardSurface({
   const playback: MusicPlaybackState = linkedPlayback ?? {
     status: "PLAYING",
     positionSeconds: 0,
-    updatedAt: state?.updatedAt ?? new Date().toISOString(),
+    updatedAt: state?.updatedAt ?? "1970-01-01T00:00:00.000Z",
   };
 
   return (
