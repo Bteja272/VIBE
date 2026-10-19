@@ -2,13 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import RoomBoard from "@/components/room-board";
+
+import RoomBoardSurface from "@/components/room-board-surface";
+
 import RoomChat from "@/components/room-chat";
 
 import RoomDm from "@/components/room-dm";
 
 import Room3dScene from "@/components/room-3d-scene";
 
-import RoomMusic from "@/components/room-music";
+import RoomMusic, {
+  type RoomMusicState,
+  type RoomMusicTrack,
+} from "@/components/room-music";
 
 import VibeAvatar from "@/components/vibe-avatar";
 
@@ -23,6 +30,8 @@ import { socket } from "@/src/lib/socket";
 import type { ChatMessage } from "@/src/types/chat";
 
 import type { DirectMessage } from "@/src/types/dm";
+
+import type { RoomBoardState } from "@/src/types/board";
 
 interface SpatialRoomProps {
   roomId: string;
@@ -69,6 +78,10 @@ const MENTION_NOTIFICATION_LIFETIME_MS = 4000;
 const BUBBLE_MAX_LENGTH = 70;
 
 const MENTION_PREVIEW_MAX_LENGTH = 90;
+
+const BOARD_HIDDEN_STORAGE_PREFIX = "vibe_board_hidden:";
+
+const SOCKET_TIMEOUT_MS = 5000;
 
 function truncateText(content: string, maxLength: number) {
   const trimmed = content.trim();
@@ -119,6 +132,14 @@ export default function SpatialRoom({
   const [chatOpen, setChatOpen] = useState(false);
 
   const [musicOpen, setMusicOpen] = useState(false);
+
+  const [boardOpen, setBoardOpen] = useState(false);
+
+  const [boardState, setBoardState] = useState<RoomBoardState | null>(null);
+
+  const [musicState, setMusicState] = useState<RoomMusicState | null>(null);
+
+  const [boardHiddenForMe, setBoardHiddenForMe] = useState(false);
 
   const [roomViewMode, setRoomViewMode] = useState<RoomViewMode>("3D");
 
@@ -192,6 +213,37 @@ export default function SpatialRoom({
         : undefined,
     [users, openParticipantId],
   );
+
+  const boardVideoId =
+    boardState?.roomId === roomId && boardState.media?.type === "YOUTUBE"
+      ? (boardState.media.videoId ?? null)
+      : null;
+
+  const boardPlayback =
+    boardVideoId &&
+    musicState?.roomId === roomId &&
+    musicState.track?.provider === "youtube" &&
+    musicState.track.videoId === boardVideoId
+      ? (musicState.playback ?? null)
+      : null;
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        setBoardHiddenForMe(
+          window.sessionStorage.getItem(
+            `${BOARD_HIDDEN_STORAGE_PREFIX}${roomId}`,
+          ) === "true",
+        );
+      } catch {
+        /* sessionStorage may be unavailable. */
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [roomId]);
 
   useEffect(() => {
     const timers = bubbleTimers.current;
@@ -417,6 +469,72 @@ export default function SpatialRoom({
     };
   }, [handleIncomingDm]);
 
+  function setBoardHidden(hidden: boolean) {
+    setBoardHiddenForMe(hidden);
+
+    try {
+      window.sessionStorage.setItem(
+        `${BOARD_HIDDEN_STORAGE_PREFIX}${roomId}`,
+        String(hidden),
+      );
+    } catch {
+      /* Keep the preference in component state if storage is unavailable. */
+    }
+  }
+
+  function showMusicTrackOnBoard(
+    track: RoomMusicTrack,
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!isOwner || !currentUserId || track.provider !== "youtube") {
+      return Promise.resolve({
+        ok: false,
+        error: "Only the room owner can show shared music on the room board",
+      });
+    }
+
+    return new Promise((resolve) => {
+      socket.timeout(SOCKET_TIMEOUT_MS).emit(
+        "board:set",
+        {
+          type: "YOUTUBE",
+          url: track.url,
+          title: track.title,
+        },
+        (
+          timeoutError: Error | null,
+          response?: {
+            ok: boolean;
+            state?: RoomBoardState;
+            error?: string;
+          },
+        ) => {
+          if (timeoutError) {
+            resolve({
+              ok: false,
+              error: "The server did not respond.",
+            });
+            return;
+          }
+
+          if (!response?.ok) {
+            resolve({
+              ok: false,
+              error: response?.error ?? "Unable to show music on the room board",
+            });
+            return;
+          }
+
+          if (response.state) {
+            setBoardState(response.state);
+          }
+
+          setBoardHidden(false);
+          resolve({ ok: true });
+        },
+      );
+    });
+  }
+
   function handleSeatClick(seatId: string) {
     if (!currentUserId || occupiedSeats.has(seatId)) {
       return;
@@ -472,6 +590,8 @@ export default function SpatialRoom({
 
     setMusicOpen(false);
 
+    setBoardOpen(false);
+
     closeParticipantMenu();
 
     setMentionNotification(null);
@@ -498,6 +618,8 @@ export default function SpatialRoom({
   function openChat() {
     setMusicOpen(false);
 
+    setBoardOpen(false);
+
     closeDm();
 
     closeParticipantMenu();
@@ -516,6 +638,8 @@ export default function SpatialRoom({
 
     setMusicOpen(shouldOpen);
 
+    setBoardOpen(false);
+
     setChatOpen(false);
 
     closeDm();
@@ -532,6 +656,8 @@ export default function SpatialRoom({
 
     setMusicOpen(false);
 
+    setBoardOpen(false);
+
     closeDm();
 
     setMentionNotification(null);
@@ -546,6 +672,8 @@ export default function SpatialRoom({
 
     setMusicOpen(false);
 
+    setBoardOpen(false);
+
     clearChatIndicators();
 
     setChatPrefill({
@@ -555,6 +683,22 @@ export default function SpatialRoom({
     });
 
     setChatOpen(true);
+  }
+
+  function toggleBoard() {
+    const shouldOpen = !boardOpen;
+
+    setBoardOpen(shouldOpen);
+
+    setMusicOpen(false);
+
+    setChatOpen(false);
+
+    closeDm();
+
+    closeParticipantMenu();
+
+    setMentionNotification(null);
   }
 
   const handleChatPrefillConsumed = useCallback(() => {
@@ -625,6 +769,9 @@ export default function SpatialRoom({
             dmUnreadCounts={dmUnreadCounts}
             activeBubbles={activeBubbles}
             onChatBubbleClick={openChat}
+            boardState={boardState}
+            boardHidden={boardHiddenForMe}
+            boardPlayback={boardPlayback}
           />
         )}
 
@@ -634,15 +781,13 @@ export default function SpatialRoom({
 
             <div className="absolute inset-x-0 top-0 h-[36%] border-b border-neutral-800 bg-neutral-900/60" />
 
-            <div className="absolute left-1/2 top-[10%] -translate-x-1/2">
-              <div className="rounded-xl border border-neutral-700 bg-neutral-950 px-8 py-3 text-center shadow-lg">
-                <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">
-                  VIBE
-                </p>
-
-                <p className="mt-1 text-sm text-neutral-400">shared space</p>
-              </div>
-            </div>
+            <RoomBoardSurface
+              state={boardState}
+              hidden={boardHiddenForMe}
+              linkedPlayback={boardPlayback}
+              showPlaceholder
+              className="absolute left-1/2 top-[6%] z-10 h-[18%] aspect-[34/15] -translate-x-1/2 rounded-xl border border-neutral-700 shadow-lg"
+            />
 
             <div className="absolute inset-x-[7%] bottom-[8%] top-[19%] rounded-[3rem] border border-neutral-800/70 bg-neutral-900/30" />
           </>
@@ -661,6 +806,20 @@ export default function SpatialRoom({
             <span aria-hidden="true">🔊</span>
           </button>
         </div>
+
+        {/* Shared room screen */}
+
+        <RoomBoard
+          roomId={roomId}
+          isOwner={isOwner}
+          canControl={Boolean(currentUserId)}
+          open={boardOpen}
+          onToggle={toggleBoard}
+          onClose={() => setBoardOpen(false)}
+          onStateChange={setBoardState}
+          hiddenForMe={boardHiddenForMe}
+          onHiddenForMeChange={setBoardHidden}
+        />
 
         {/* Chat */}
 
@@ -1158,15 +1317,6 @@ export default function SpatialRoom({
 
         {/* Music popover */}
 
-        {musicOpen && (
-          <button
-            type="button"
-            aria-label="Close shared music"
-            onClick={() => setMusicOpen(false)}
-            className="absolute inset-0 z-30 bg-black/20"
-          />
-        )}
-
         {/*
 
 
@@ -1243,6 +1393,9 @@ export default function SpatialRoom({
               isOwner={isOwner}
               canControl={Boolean(currentUserId)}
               compact
+              boardVideoId={boardVideoId}
+              onStateChange={setMusicState}
+              onShowOnBoard={showMusicTrackOnBoard}
             />
           </div>
         </aside>

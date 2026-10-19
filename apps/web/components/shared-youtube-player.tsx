@@ -26,6 +26,7 @@ interface SharedYouTubePlayerProps {
   playback: MusicPlaybackState;
   title: string;
   muted: boolean;
+  embedded?: boolean;
   onEnded?: (positionSeconds: number) => void;
 }
 
@@ -199,7 +200,7 @@ const SharedYouTubePlayer = forwardRef<
   SharedYouTubePlayerHandle,
   SharedYouTubePlayerProps
 >(function SharedYouTubePlayer(
-  { videoId, playback, title, muted, onEnded },
+  { videoId, playback, title, muted, embedded = false, onEnded },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -619,22 +620,28 @@ const SharedYouTubePlayer = forwardRef<
   }, [ready, applyAuthoritativePlayback]);
 
   return (
-    <div>
-      <div className="aspect-video overflow-hidden rounded-lg border border-neutral-800 bg-black">
+    <div className={embedded ? "h-full w-full" : undefined}>
+      <div
+        className={
+          embedded
+            ? "h-full w-full overflow-hidden bg-black"
+            : "aspect-video overflow-hidden rounded-lg border border-neutral-800 bg-black"
+        }
+      >
         <div ref={containerRef} aria-label={title} className="h-full w-full" />
       </div>
 
-      {!ready && !playerError && (
+      {!embedded && !ready && !playerError && (
         <p className="mt-2 text-xs text-neutral-500">
           Loading YouTube player...
         </p>
       )}
 
-      {playerError && (
+      {!embedded && playerError && (
         <p className="mt-2 text-xs text-red-400">{playerError}</p>
       )}
 
-      {autoplayBlocked && playback.status === "PLAYING" && (
+      {!embedded && autoplayBlocked && playback.status === "PLAYING" && (
         <div className="mt-2 rounded-lg border border-amber-900/60 bg-amber-950/30 p-3">
           <p className="text-xs text-amber-200">
             Your browser blocked automatic playback. Click below to start

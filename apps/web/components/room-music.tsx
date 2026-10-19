@@ -19,7 +19,16 @@ type MusicPermission = "OWNER_ONLY" | "ANY_MEMBER";
 
 type PlaybackAction = "PLAY" | "PAUSE" | "SEEK";
 
-interface RoomMusicState {
+export interface RoomMusicTrack {
+  trackId?: string;
+  url: string;
+  title?: string;
+  provider?: string;
+  videoId?: string;
+  sharedBy: string;
+}
+
+export interface RoomMusicState {
   roomId: string;
 
   /*
@@ -32,14 +41,7 @@ interface RoomMusicState {
 
   permission: MusicPermission;
 
-  track: {
-    trackId?: string;
-    url: string;
-    title?: string;
-    provider?: string;
-    videoId?: string;
-    sharedBy: string;
-  } | null;
+  track: RoomMusicTrack | null;
 
   playback?: MusicPlaybackState | null;
 
@@ -51,6 +53,12 @@ interface RoomMusicProps {
   isOwner: boolean;
   canControl: boolean;
   compact?: boolean;
+  boardVideoId?: string | null;
+  onStateChange?: (state: RoomMusicState | null) => void;
+  onShowOnBoard?: (track: RoomMusicTrack) => Promise<{
+    ok: boolean;
+    error?: string;
+  }>;
 }
 
 interface MusicActionResponse {
@@ -172,6 +180,9 @@ export default function RoomMusic({
   isOwner,
   canControl,
   compact = false,
+  boardVideoId = null,
+  onStateChange,
+  onShowOnBoard,
 }: RoomMusicProps) {
   const [state, setState] = useState<RoomMusicState | null>(null);
 
@@ -191,6 +202,8 @@ export default function RoomMusic({
   const [loading, setLoading] = useState(false);
 
   const [playbackLoading, setPlaybackLoading] = useState(false);
+
+  const [boardLoading, setBoardLoading] = useState(false);
 
   const [sharingOpen, setSharingOpen] = useState(false);
 
@@ -277,8 +290,9 @@ export default function RoomMusic({
       stateRef.current = incoming;
 
       setState(incoming);
+      onStateChange?.(incoming);
     },
-    [roomId],
+    [roomId, onStateChange],
   );
 
   /*
@@ -400,6 +414,12 @@ export default function RoomMusic({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [acceptState]);
+
+  useEffect(() => {
+    return () => {
+      onStateChange?.(null);
+    };
+  }, [onStateChange]);
 
   /*
    * DISPLAY TIMER ONLY.
@@ -692,6 +712,35 @@ export default function RoomMusic({
     sendPlaybackCommand("SEEK", boundedValue);
   }
 
+  async function showCurrentTrackOnBoard() {
+    if (
+      !track ||
+      !youtubeVideoId ||
+      !onShowOnBoard ||
+      boardLoading ||
+      boardVideoId === youtubeVideoId
+    ) {
+      return;
+    }
+
+    setBoardLoading(true);
+    setError(null);
+
+    try {
+      const result = await onShowOnBoard(track);
+
+      if (!result.ok) {
+        setError(
+          result.error ?? "Unable to show this track on the room screen",
+        );
+      }
+    } catch {
+      setError("Unable to show this track on the room screen");
+    } finally {
+      setBoardLoading(false);
+    }
+  }
+
   function handleTrackEnded(positionSeconds: number) {
     /*
      * Every local YouTube player can detect completion,
@@ -809,6 +858,26 @@ export default function RoomMusic({
                         <span aria-hidden="true">↗</span>
                       </a>
                     </div>
+
+                    {isOwner && onShowOnBoard && (
+                      <button
+                        type="button"
+                        onClick={showCurrentTrackOnBoard}
+                        disabled={
+                          boardLoading ||
+                          loading ||
+                          !youtubeVideoId ||
+                          boardVideoId === youtubeVideoId
+                        }
+                        className="w-full rounded-lg border border-neutral-700 px-3 py-2 text-xs font-medium text-neutral-200 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {boardVideoId === youtubeVideoId
+                          ? "Playing on room board"
+                          : boardLoading
+                            ? "Sending to board..."
+                            : "Show this video on room board"}
+                      </button>
+                    )}
 
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-neutral-400">

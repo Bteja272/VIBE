@@ -8,6 +8,10 @@ import { Canvas, useFrame } from "@react-three/fiber";
 
 import { Environment, RoundedBox, Text } from "@react-three/drei";
 
+import RoomBoardSurface from "@/components/room-board-surface";
+import type { MusicPlaybackState } from "@/components/shared-youtube-player";
+import type { RoomBoardState } from "@/src/types/board";
+
 import {
   getSeatPosition3D,
   SPATIAL_SEATS_3D,
@@ -39,6 +43,12 @@ interface Room3dSceneProps {
   >;
 
   onChatBubbleClick?: () => void;
+
+  boardState?: RoomBoardState | null;
+
+  boardHidden?: boolean;
+
+  boardPlayback?: MusicPlaybackState | null;
 }
 
 interface Seat3dProps {
@@ -585,6 +595,12 @@ function RoomEnvironment({
   >;
 
   onChatBubbleClick?: () => void;
+
+  boardState?: RoomBoardState | null;
+
+  boardHidden?: boolean;
+
+  boardPlayback?: MusicPlaybackState | null;
 }) {
   const occupiedSeatIds = new Set(Object.values(assignments));
 
@@ -728,10 +744,15 @@ export default function Room3dScene({
   dmUnreadCounts = {},
   activeBubbles = {},
   onChatBubbleClick,
+  boardState = null,
+  boardHidden = false,
+  boardPlayback = null,
 }: Room3dSceneProps) {
   return (
     <div
-      className={className ?? "h-full min-h-[520px] w-full sm:min-h-[620px]"}
+      className={
+        className ?? "relative h-full min-h-[520px] w-full sm:min-h-[620px]"
+      }
     >
       <Canvas
         shadows
@@ -761,6 +782,22 @@ export default function Room3dScene({
 
         <Environment preset="city" />
       </Canvas>
+
+      {/*
+       * The camera is fixed, so the rear display has a stable screen-space
+       * projection. Keep the media DOM surface tightly aligned to that
+       * physical display instead of floating across the room.
+       *
+       * pointer-events-none is intentional: board media must never steal
+       * clicks from chairs or participants in the WebGL scene.
+       */}
+      <RoomBoardSurface
+        state={boardState}
+        hidden={boardHidden}
+        linkedPlayback={boardPlayback}
+        className="absolute left-1/2 top-[5.1%] z-10 h-[12.8%] aspect-[34/15] -translate-x-1/2 rounded-[0.35rem] border border-neutral-800/70 shadow-sm"
+      />
+
     </div>
   );
 }

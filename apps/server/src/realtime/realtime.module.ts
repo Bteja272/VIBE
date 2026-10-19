@@ -1,58 +1,33 @@
-import {
-  Module,
-} from '@nestjs/common';
+import { Module } from '@nestjs/common';
 
-import {
-  ConfigModule,
-  ConfigService,
-} from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
-import {
-  JwtModule,
-} from '@nestjs/jwt';
+import { JwtModule } from '@nestjs/jwt';
 
-import {
-  ChatService,
-} from './chat.service';
+import { BoardService } from './board.service';
 
-import {
-  MusicService,
-} from './music.service';
+import { ChatService } from './chat.service';
 
-import {
-  PresenceService,
-} from './presence.service';
+import { MusicService } from './music.service';
 
-import {
-  RealtimeGateway,
-} from './realtime.gateway';
+import { PresenceService } from './presence.service';
+
+import { RealtimeGateway } from './realtime.gateway';
 
 @Module({
   imports: [
     ConfigModule,
 
     JwtModule.registerAsync({
-      imports: [
-        ConfigModule,
-      ],
+      imports: [ConfigModule],
 
-      inject: [
-        ConfigService,
-      ],
+      inject: [ConfigService],
 
-      useFactory: (
-        configService:
-          ConfigService,
-      ) => {
-        const secret =
-          configService.get<string>(
-            'BACKEND_JWT_SECRET',
-          );
+      useFactory: (configService: ConfigService) => {
+        const secret = configService.get<string>('BACKEND_JWT_SECRET');
 
         if (!secret) {
-          throw new Error(
-            'BACKEND_JWT_SECRET is not configured',
-          );
+          throw new Error('BACKEND_JWT_SECRET is not configured');
         }
 
         return {
@@ -63,6 +38,7 @@ import {
   ],
 
   providers: [
+    BoardService,
     ChatService,
     MusicService,
     PresenceService,

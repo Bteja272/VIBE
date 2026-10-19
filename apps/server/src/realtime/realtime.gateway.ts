@@ -17,6 +17,8 @@ import type { Server, Socket } from 'socket.io';
 
 import type { AuthUser, VibeJwtPayload } from '../auth/auth-user';
 
+import { BoardService, type BoardMediaType } from './board.service';
+
 import { ChatService } from './chat.service';
 
 import {
@@ -65,6 +67,14 @@ interface MusicPlaybackPayload {
   positionSeconds: number;
 }
 
+interface BoardSetPayload {
+  type: BoardMediaType;
+
+  url: string;
+
+  title?: string;
+}
+
 interface DmSendPayload {
   recipientUserId: string;
 
@@ -106,6 +116,8 @@ export class RealtimeGateway
     private readonly jwtService: JwtService,
 
     private readonly presenceService: PresenceService,
+
+    private readonly boardService: BoardService,
 
     private readonly chatService: ChatService,
 
@@ -717,6 +729,145 @@ export class RealtimeGateway
 
       message,
     };
+  }
+
+  @SubscribeMessage('board:get')
+  async handleBoardGet(
+    @ConnectedSocket()
+    client: Socket,
+  ) {
+    const roomId = client.data.watchingRoomId as string | undefined;
+
+    if (!roomId) {
+      return {
+        ok: false,
+
+        error: 'You are not watching a room',
+      };
+    }
+
+    const state = await this.boardService.getState(roomId);
+
+    return {
+      ok: true,
+
+      state,
+    };
+  }
+
+  @SubscribeMessage('board:set')
+  async handleBoardSet(
+    @ConnectedSocket()
+    client: Socket,
+
+    @MessageBody()
+    payload: BoardSetPayload,
+  ) {
+    const roomId = client.data.roomId as string | undefined;
+
+    const presenceId = client.data.presenceId as string | undefined;
+
+    const user = client.data.user as AuthUser | undefined;
+
+    if (!roomId || !presenceId || !user) {
+      return {
+        ok: false,
+
+        error: 'Join the room before controlling the room screen',
+      };
+    }
+
+    const present = await this.presenceService.isPresent(roomId, presenceId);
+
+    if (!present) {
+      return {
+        ok: false,
+
+        error: 'You are not currently present in this room',
+      };
+    }
+
+    try {
+      const state = await this.boardService.setMedia({
+        roomId,
+
+        user,
+
+        type: payload?.type,
+
+        url: payload?.url ?? '',
+
+        title: payload?.title,
+      });
+
+      this.server.to(this.getRoomChannel(roomId)).emit('board:update', state);
+
+      return {
+        ok: true,
+
+        state,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Unable to update the room screen',
+      };
+    }
+  }
+
+  @SubscribeMessage('board:clear')
+  async handleBoardClear(
+    @ConnectedSocket()
+    client: Socket,
+  ) {
+    const roomId = client.data.roomId as string | undefined;
+
+    const presenceId = client.data.presenceId as string | undefined;
+
+    const user = client.data.user as AuthUser | undefined;
+
+    if (!roomId || !presenceId || !user) {
+      return {
+        ok: false,
+
+        error: 'Join the room before controlling the room screen',
+      };
+    }
+
+    const present = await this.presenceService.isPresent(roomId, presenceId);
+
+    if (!present) {
+      return {
+        ok: false,
+
+        error: 'You are not currently present in this room',
+      };
+    }
+
+    try {
+      const state = await this.boardService.clearMedia(roomId, user);
+
+      this.server.to(this.getRoomChannel(roomId)).emit('board:update', state);
+
+      return {
+        ok: true,
+
+        state,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Unable to clear the room screen',
+      };
+    }
   }
 
   @SubscribeMessage('music:get')
