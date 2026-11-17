@@ -189,6 +189,82 @@ export const CAMPFIRE_SPATIAL_SEATS_3D: SeatPosition3D[] = [
   },
 ];
 
+
+/*
+ * Library layout.
+ *
+ * The same server-authoritative logical seat IDs are arranged around three
+ * reading tables. Only their 3D presentation changes when the Library
+ * environment is selected.
+ */
+export const LIBRARY_SPATIAL_SEATS_3D: SeatPosition3D[] = [
+  // Left reading table
+  {
+    id: "seat-1",
+    position: [-3.3, 0.35, 2.05],
+    rotation: [0, Math.PI, 0],
+  },
+  {
+    id: "seat-2",
+    position: [-3.3, 0.35, -0.85],
+    rotation: [0, 0, 0],
+  },
+  {
+    id: "seat-3",
+    position: [-4.65, 0.35, 0.6],
+    rotation: [0, Math.PI / 2, 0],
+  },
+  {
+    id: "seat-4",
+    position: [-1.95, 0.35, 0.6],
+    rotation: [0, -Math.PI / 2, 0],
+  },
+
+  // Center reading table
+  {
+    id: "seat-5",
+    position: [0, 0.35, 2.05],
+    rotation: [0, Math.PI, 0],
+  },
+  {
+    id: "seat-6",
+    position: [0, 0.35, -0.85],
+    rotation: [0, 0, 0],
+  },
+  {
+    id: "seat-7",
+    position: [-1.35, 0.35, 0.6],
+    rotation: [0, Math.PI / 2, 0],
+  },
+  {
+    id: "seat-8",
+    position: [1.35, 0.35, 0.6],
+    rotation: [0, -Math.PI / 2, 0],
+  },
+
+  // Right reading table
+  {
+    id: "seat-9",
+    position: [3.3, 0.35, 2.05],
+    rotation: [0, Math.PI, 0],
+  },
+  {
+    id: "seat-10",
+    position: [3.3, 0.35, -0.85],
+    rotation: [0, 0, 0],
+  },
+  {
+    id: "seat-11",
+    position: [1.95, 0.35, 0.6],
+    rotation: [0, Math.PI / 2, 0],
+  },
+  {
+    id: "seat-12",
+    position: [4.65, 0.35, 0.6],
+    rotation: [0, -Math.PI / 2, 0],
+  },
+];
+
 export function getSeatPosition3D(
   seatId: string,
   seats: SeatPosition3D[] = SPATIAL_SEATS_3D,

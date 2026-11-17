@@ -798,21 +798,27 @@ export default function SpatialRoom({
               className="flex rounded-lg border border-neutral-800 bg-neutral-950 p-1"
               aria-label="3D environment"
             >
-              {(["LOUNGE", "CAMPFIRE"] as const).map((environmentId) => (
-                <button
-                  key={environmentId}
-                  type="button"
-                  onClick={() => setRoomEnvironmentId(environmentId)}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                    roomEnvironmentId === environmentId
-                      ? "bg-neutral-800 text-neutral-100"
-                      : "text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200"
-                  }`}
-                  aria-pressed={roomEnvironmentId === environmentId}
-                >
-                  {environmentId === "LOUNGE" ? "Lounge" : "Campfire"}
-                </button>
-              ))}
+              {(["LOUNGE", "CAMPFIRE", "LIBRARY"] as const).map(
+                (environmentId) => (
+                  <button
+                    key={environmentId}
+                    type="button"
+                    onClick={() => setRoomEnvironmentId(environmentId)}
+                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                      roomEnvironmentId === environmentId
+                        ? "bg-neutral-800 text-neutral-100"
+                        : "text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200"
+                    }`}
+                    aria-pressed={roomEnvironmentId === environmentId}
+                  >
+                    {environmentId === "LOUNGE"
+                      ? "Lounge"
+                      : environmentId === "CAMPFIRE"
+                        ? "Campfire"
+                        : "Library"}
+                  </button>
+                ),
+              )}
             </div>
           )}
 

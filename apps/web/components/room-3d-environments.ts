@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 
 import CampfireRoom3dEnvironment from "@/components/room-3d-campfire-environment";
+import LibraryRoom3dEnvironment from "@/components/room-3d-library-environment";
 import LoungeRoom3dEnvironment from "@/components/room-3d-environment";
 import type {
   Room3dBoardSurfaceDefinition,
@@ -8,14 +9,14 @@ import type {
   Room3dEnvironmentProps,
 } from "@/components/room-3d-environment-types";
 
-export type Room3dEnvironmentId = "LOUNGE" | "CAMPFIRE";
+export type Room3dEnvironmentId = "LOUNGE" | "CAMPFIRE" | "LIBRARY";
 
 export interface Room3dEnvironmentDefinition {
   id: Room3dEnvironmentId;
   label: string;
   Component: ComponentType<Room3dEnvironmentProps>;
   background: string;
-  lightingPreset: "city" | "night";
+  lightingPreset: "city" | "night" | "apartment";
   camera: Room3dCameraDefinition;
   boardSurface: Room3dBoardSurfaceDefinition;
 }
@@ -56,12 +57,32 @@ const CAMPFIRE_ENVIRONMENT: Room3dEnvironmentDefinition = {
   },
 };
 
+
+const LIBRARY_ENVIRONMENT: Room3dEnvironmentDefinition = {
+  id: "LIBRARY",
+  label: "Library",
+  Component: LibraryRoom3dEnvironment,
+  background: "#070605",
+  lightingPreset: "apartment",
+  camera: {
+    position: [0, 7.8, 11.8],
+    fov: 45,
+    responsiveReferenceAspect: 1.35,
+    maxResponsiveFov: 70,
+  },
+  boardSurface: {
+    topLeft: [-1.55, 3.25, -4.24],
+    bottomRight: [1.55, 1.95, -4.24],
+  },
+};
+
 export const ROOM_3D_ENVIRONMENTS: Record<
   Room3dEnvironmentId,
   Room3dEnvironmentDefinition
 > = {
   LOUNGE: LOUNGE_ENVIRONMENT,
   CAMPFIRE: CAMPFIRE_ENVIRONMENT,
+  LIBRARY: LIBRARY_ENVIRONMENT,
 };
 
 export function getRoom3dEnvironmentDefinition(
